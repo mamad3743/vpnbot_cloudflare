@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" role="img" aria-label="Config Sales Bot — ربات فروش کانفیگ VPN">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1020"><animate attributeName="stop-color" values="#0b1020;#161033;#071a2e;#0b1020" dur="12s" repeatCount="indefinite"/></stop>
+      <stop offset="0.55" stop-color="#17133f"><animate attributeName="stop-color" values="#17133f;#0b2a4a;#241046;#17133f" dur="12s" repeatCount="indefinite"/></stop>
+      <stop offset="1" stop-color="#062a3f"><animate attributeName="stop-color" values="#062a3f;#2a0f3f;#0a2540;#062a3f" dur="12s" repeatCount="indefinite"/></stop>
+    </linearGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+      <stop offset="0" stop-color="#7dd3fc"/>
+      <stop offset="0.5" stop-color="#c4b5fd"/>
+      <stop offset="1" stop-color="#f0abfc"/>
+      <animateTransform attributeName="gradientTransform" type="translate" values="-0.6 0;0.6 0;-0.6 0" dur="6s" repeatCount="indefinite"/>
+    </linearGradient>
+    <linearGradient id="chip" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#38bdf8" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#a78bfa" stop-opacity="0.25"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#38bdf8" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#38bdf8" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="3"/></filter>
+    <clipPath id="round"><rect width="1200" height="320" rx="22"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#round)">
+    <rect width="1200" height="320" fill="url(#bg)"/>
+
+    <!-- grid -->
+    <g stroke="#ffffff" stroke-opacity="0.045" stroke-width="1">
+      <path d="M0 40H1200M0 80H1200M0 120H1200M0 160H1200M0 200H1200M0 240H1200M0 280H1200"/>
+      <path d="M60 0V320M120 0V320M180 0V320M240 0V320M300 0V320M360 0V320M420 0V320M480 0V320M540 0V320M600 0V320M660 0V320M720 0V320M780 0V320M840 0V320M900 0V320M960 0V320M1020 0V320M1080 0V320M1140 0V320"/>
+    </g>
+
+    <!-- floating orbs -->
+    <g filter="url(#soft)">
+      <circle cx="980" cy="70" r="46" fill="#38bdf8" fill-opacity="0.18"><animate attributeName="cy" values="70;100;70" dur="7s" repeatCount="indefinite"/></circle>
+      <circle cx="1100" cy="250" r="64" fill="#a78bfa" fill-opacity="0.16"><animate attributeName="cy" values="250;220;250" dur="9s" repeatCount="indefinite"/></circle>
+      <circle cx="620" cy="285" r="40" fill="#f0abfc" fill-opacity="0.12"><animate attributeName="cx" values="620;680;620" dur="8s" repeatCount="indefinite"/></circle>
+    </g>
+    <g fill="#ffffff">
+      <circle cx="430" cy="48" r="2"><animate attributeName="opacity" values="0.1;0.9;0.1" dur="3s" repeatCount="indefinite"/></circle>
+      <circle cx="760" cy="36" r="1.6"><animate attributeName="opacity" values="0.9;0.1;0.9" dur="4s" repeatCount="indefinite"/></circle>
+      <circle cx="1040" cy="150" r="2"><animate attributeName="opacity" values="0.2;1;0.2" dur="3.5s" repeatCount="indefinite"/></circle>
+      <circle cx="560" cy="300" r="1.6"><animate attributeName="opacity" values="0.8;0.1;0.8" dur="2.8s" repeatCount="indefinite"/></circle>
+      <circle cx="880" cy="290" r="2"><animate attributeName="opacity" values="0.1;0.9;0.1" dur="4.4s" repeatCount="indefinite"/></circle>
+    </g>
+
+    <!-- paper plane flying across -->
+    <g>
+      <animateMotion dur="9s" repeatCount="indefinite" rotate="auto" path="M-60 280 C 250 120, 520 330, 800 140 S 1180 40, 1280 60"/>
+      <path d="M0 0 L-26 -9 L-17 0 L-26 9 Z" fill="#7dd3fc"/>
+      <path d="M0 0 L-17 0 L-20 7 Z" fill="#0ea5e9"/>
+      <path d="M-26 -9 L-60 -9" stroke="#7dd3fc" stroke-opacity="0.35" stroke-width="2" stroke-linecap="round"/>
+      <path d="M-20 0 L-70 0" stroke="#7dd3fc" stroke-opacity="0.2" stroke-width="2" stroke-linecap="round"/>
+    </g>
+
+    <!-- robot -->
+    <g transform="translate(150 160)">
+      <animateTransform attributeName="transform" type="translate" values="150 160;150 144;150 160" dur="3.6s" repeatCount="indefinite" additive="replace"/>
+      <circle r="120" fill="url(#glow)"><animate attributeName="r" values="105;130;105" dur="3.6s" repeatCount="indefinite"/></circle>
+      <!-- antenna -->
+      <line x1="0" y1="-78" x2="0" y2="-58" stroke="#94a3b8" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="0" cy="-86" r="8" fill="#f472b6"><animate attributeName="fill" values="#f472b6;#fde68a;#f472b6" dur="1.4s" repeatCount="indefinite"/><animate attributeName="r" values="7;10;7" dur="1.4s" repeatCount="indefinite"/></circle>
+      <!-- ears -->
+      <rect x="-82" y="-24" width="14" height="38" rx="6" fill="#475569"/>
+      <rect x="68" y="-24" width="14" height="38" rx="6" fill="#475569"/>
+      <!-- head -->
+      <rect x="-68" y="-58" width="136" height="104" rx="26" fill="#1e293b" stroke="#38bdf8" stroke-width="3"/>
+      <rect x="-54" y="-44" width="108" height="64" rx="18" fill="#0b1220"/>
+      <!-- eyes -->
+      <ellipse cx="-24" cy="-12" rx="11" ry="12" fill="#7dd3fc"><animate attributeName="ry" values="12;12;1.5;12;12" keyTimes="0;0.44;0.48;0.52;1" dur="4s" repeatCount="indefinite"/></ellipse>
+      <ellipse cx="24" cy="-12" rx="11" ry="12" fill="#7dd3fc"><animate attributeName="ry" values="12;12;1.5;12;12" keyTimes="0;0.44;0.48;0.52;1" dur="4s" repeatCount="indefinite"/></ellipse>
+      <!-- mouth -->
+      <path d="M-18 8 Q0 20 18 8" stroke="#7dd3fc" stroke-width="3.5" fill="none" stroke-linecap="round"><animate attributeName="d" values="M-18 8 Q0 20 18 8;M-18 10 Q0 14 18 10;M-18 8 Q0 20 18 8" dur="4s" repeatCount="indefinite"/></path>
+      <!-- chest panel -->
+      <rect x="-40" y="52" width="80" height="34" rx="10" fill="#1e293b" stroke="#a78bfa" stroke-width="2.5"/>
+      <circle cx="-20" cy="69" r="5" fill="#34d399"><animate attributeName="opacity" values="1;0.2;1" dur="1.2s" repeatCount="indefinite"/></circle>
+      <circle cx="0" cy="69" r="5" fill="#fbbf24"><animate attributeName="opacity" values="0.2;1;0.2" dur="1.2s" repeatCount="indefinite"/></circle>
+      <circle cx="20" cy="69" r="5" fill="#f87171"><animate attributeName="opacity" values="1;0.2;1" dur="1.7s" repeatCount="indefinite"/></circle>
+    </g>
+
+    <!-- title -->
+    <text x="330" y="150" font-family="'Segoe UI','Inter','Vazirmatn',Tahoma,'DejaVu Sans',sans-serif" font-size="64" font-weight="800" fill="url(#title)" letter-spacing="1">Config Sales Bot</text>
+    <text x="332" y="194" font-family="'Vazirmatn','Segoe UI',Tahoma,'DejaVu Sans',sans-serif" font-size="25" fill="#e2e8f0">ربات فروش کانفیگ با پنل مدیریت کامل داخل تلگرام</text>
+    <rect x="332" y="212" width="120" height="3" rx="1.5" fill="#7dd3fc"><animate attributeName="width" values="40;300;40" dur="4s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.4;1;0.4" dur="4s" repeatCount="indefinite"/></rect>
+
+    <!-- chips -->
+    <g font-family="'Segoe UI','Inter',Tahoma,'DejaVu Sans',sans-serif" font-size="16" font-weight="600" fill="#cbd5e1">
+      <g><rect x="332" y="246" width="190" height="34" rx="17" fill="url(#chip)" stroke="#38bdf8" stroke-opacity="0.5"/><text x="427" y="268" text-anchor="middle">Cloudflare Workers</text></g>
+      <g><rect x="534" y="246" width="80" height="34" rx="17" fill="url(#chip)" stroke="#a78bfa" stroke-opacity="0.5"/><text x="574" y="268" text-anchor="middle">D1 DB</text></g>
+      <g><rect x="626" y="246" width="104" height="34" rx="17" fill="url(#chip)" stroke="#f0abfc" stroke-opacity="0.5"/><text x="678" y="268" text-anchor="middle">Marzban</text></g>
+      <g><rect x="742" y="246" width="124" height="34" rx="17" fill="url(#chip)" stroke="#38bdf8" stroke-opacity="0.5"/><text x="804" y="268" text-anchor="middle">PasarGuard</text></g>
+      <g><rect x="878" y="246" width="90" height="34" rx="17" fill="url(#chip)" stroke="#a78bfa" stroke-opacity="0.5"/><text x="923" y="268" text-anchor="middle">3x-ui</text></g>
+    </g>
+  </g>
+</svg>

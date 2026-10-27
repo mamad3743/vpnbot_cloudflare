@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="360" viewBox="0 0 1000 360" role="img" aria-label="قابلیت‌ها">
+  <defs>
+    <style>
+      .t{font-family:'Vazirmatn','Segoe UI',Tahoma,'DejaVu Sans',sans-serif;fill:#f1f5f9;font-size:19px;font-weight:700;text-anchor:middle}
+      .d{font-family:'Vazirmatn','Segoe UI',Tahoma,'DejaVu Sans',sans-serif;fill:#94a3b8;font-size:13.5px;text-anchor:middle}
+      .card{animation:float 5s ease-in-out infinite}
+      .c2{animation-delay:.6s}.c3{animation-delay:1.2s}.c4{animation-delay:1.8s}.c5{animation-delay:2.4s}.c6{animation-delay:3s}
+      @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+    </style>
+  </defs>
+  <rect width="1000" height="360" rx="20" fill="#0b1020"/>
+
+  <g class="card"><rect x="30" y="30" width="290" height="140" rx="20" fill="#111a33" stroke="#38bdf8" stroke-opacity="0.7" stroke-width="2"/>
+    <text class="t" x="175" y="78" style="font-size:34px">🛒</text><text class="t" x="175" y="115" direction="rtl">فروش با کیف‌پول و کارت</text>
+    <text class="d" x="175" y="141" direction="rtl">رسید عکس‌دار + تایید ادمین + زیرمجموعه</text></g>
+  <g class="card c2"><rect x="355" y="30" width="290" height="140" rx="20" fill="#111a33" stroke="#a78bfa" stroke-opacity="0.7" stroke-width="2"/>
+    <text class="t" x="500" y="78" style="font-size:34px">🔌</text><text class="t" x="500" y="115" direction="rtl">اتصال به ۳ نوع پنل</text>
+    <text class="d" x="500" y="141">Marzban · PasarGuard · 3x-ui</text></g>
+  <g class="card c3"><rect x="680" y="30" width="290" height="140" rx="20" fill="#111a33" stroke="#f0abfc" stroke-opacity="0.7" stroke-width="2"/>
+    <text class="t" x="825" y="78" style="font-size:34px">🧮</text><text class="t" x="825" y="115" direction="rtl">حجم دلخواه</text>
+    <text class="d" x="825" y="141" direction="rtl">مشتری گیگ و روز رو انتخاب می‌کنه</text></g>
+
+  <g class="card c4"><rect x="30" y="195" width="290" height="140" rx="20" fill="#111a33" stroke="#34d399" stroke-opacity="0.7" stroke-width="2"/>
+    <text class="t" x="175" y="243" style="font-size:34px">♻️</text><text class="t" x="175" y="280" direction="rtl">تمدید اشتراک قبلی</text>
+    <text class="d" x="175" y="306" direction="rtl">حتی اشتراک‌های خارج از ربات</text></g>
+  <g class="card c5"><rect x="355" y="195" width="290" height="140" rx="20" fill="#111a33" stroke="#fbbf24" stroke-opacity="0.7" stroke-width="2"/>
+    <text class="t" x="500" y="243" style="font-size:34px">🗂</text><text class="t" x="500" y="280" direction="rtl">دسته‌بندی محصولات</text>
+    <text class="d" x="500" y="306" direction="rtl">مثلا تانل‌دار / بدون تانل</text></g>
+  <g class="card c6"><rect x="680" y="195" width="290" height="140" rx="20" fill="#111a33" stroke="#f87171" stroke-opacity="0.7" stroke-width="2"/>
+    <text class="t" x="825" y="243" style="font-size:34px">📣</text><text class="t" x="825" y="280" direction="rtl">گزارش در گروه</text>
+    <text class="d" x="825" y="306" direction="rtl">تاپیک خودکار برای تست، رسید و ارور</text></g>
+</svg>

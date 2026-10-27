@@ -1,0 +1,10 @@
+name = "config-sales-bot"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# بعد از اجرای دستور زیر، مقدار database_id رو از خروجی همون دستور اینجا جایگزین کن:
+# wrangler d1 create config-sales-bot-db
+[[d1_databases]]
+binding = "DB"
+database_name = "config-sales-bot-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"

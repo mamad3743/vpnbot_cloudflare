@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="250" viewBox="0 0 1000 250" role="img" aria-label="مسیر خرید: مشتری، ربات، پنل، اشتراک">
+  <defs>
+    <linearGradient id="line" gradientUnits="userSpaceOnUse" x1="185" y1="0" x2="740" y2="0"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#a78bfa"/></linearGradient>
+    <filter id="blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter>
+    <style>
+      .t{font-family:'Vazirmatn','Segoe UI',Tahoma,'DejaVu Sans',sans-serif;fill:#e2e8f0;text-anchor:middle}
+      .s{font-family:'Segoe UI',Tahoma,'DejaVu Sans',sans-serif;fill:#94a3b8;text-anchor:middle;font-size:13px}
+      .dash{stroke-dasharray:8 8;animation:flow 1.2s linear infinite}
+      @keyframes flow{to{stroke-dashoffset:-16}}
+      .node{animation:pulse 6s ease-in-out infinite}
+      .n2{animation-delay:1.5s}.n3{animation-delay:3s}.n4{animation-delay:4.5s}
+      @keyframes pulse{0%,100%{opacity:.55}15%,35%{opacity:1}}
+    </style>
+  </defs>
+  <rect width="1000" height="250" rx="20" fill="#0b1020"/>
+
+  <!-- connectors -->
+  <g stroke="url(#line)" stroke-width="3" stroke-linecap="round" fill="none">
+    <path class="dash" d="M185 125H290"/>
+    <path class="dash" d="M410 125H515"/>
+    <path class="dash" d="M635 125H740"/>
+  </g>
+  <!-- travelling dots -->
+  <g fill="#7dd3fc">
+    <circle r="6"><animateMotion dur="6s" repeatCount="indefinite" path="M185 125H290" keyTimes="0;0.25;1" keyPoints="0;1;1" calcMode="linear"/><animate attributeName="opacity" values="1;1;0;0" keyTimes="0;0.24;0.26;1" dur="6s" repeatCount="indefinite"/></circle>
+    <circle r="6"><animateMotion dur="6s" repeatCount="indefinite" path="M410 125H515" keyTimes="0;0.25;0.5;1" keyPoints="0;0;1;1" calcMode="linear"/><animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.25;0.26;0.49;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
+    <circle r="6"><animateMotion dur="6s" repeatCount="indefinite" path="M635 125H740" keyTimes="0;0.5;0.75;1" keyPoints="0;0;1;1" calcMode="linear"/><animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.5;0.51;0.74;0.75;1" dur="6s" repeatCount="indefinite"/></circle>
+  </g>
+
+  <!-- nodes -->
+  <g class="node">
+    <circle cx="105" cy="125" r="64" fill="#38bdf8" fill-opacity="0.16" filter="url(#blur)"/>
+    <rect x="35" y="55" width="150" height="140" rx="22" fill="#111a33" stroke="#38bdf8" stroke-width="2"/>
+    <text class="t" x="110" y="112" font-size="38">👤</text>
+    <text class="t" x="110" y="147" font-size="19" font-weight="700" direction="rtl">مشتری</text>
+    <text class="s" x="110" y="172">Telegram</text>
+  </g>
+  <g class="node n2">
+    <circle cx="350" cy="125" r="64" fill="#a78bfa" fill-opacity="0.16" filter="url(#blur)"/>
+    <rect x="290" y="55" width="120" height="140" rx="22" fill="#111a33" stroke="#a78bfa" stroke-width="2"/>
+    <text class="t" x="350" y="112" font-size="38">🤖</text>
+    <text class="t" x="350" y="147" font-size="19" font-weight="700" direction="rtl">ربات</text>
+    <text class="s" x="350" y="172">Worker + D1</text>
+  </g>
+  <g class="node n3">
+    <circle cx="575" cy="125" r="64" fill="#f0abfc" fill-opacity="0.16" filter="url(#blur)"/>
+    <rect x="515" y="55" width="120" height="140" rx="22" fill="#111a33" stroke="#f0abfc" stroke-width="2"/>
+    <text class="t" x="575" y="112" font-size="38">🔌</text>
+    <text class="t" x="575" y="147" font-size="19" font-weight="700" direction="rtl">پنل</text>
+    <text class="s" x="575" y="172">Marzban · 3x-ui</text>
+  </g>
+  <g class="node n4">
+    <circle cx="840" cy="125" r="64" fill="#34d399" fill-opacity="0.16" filter="url(#blur)"/>
+    <rect x="740" y="55" width="200" height="140" rx="22" fill="#111a33" stroke="#34d399" stroke-width="2"/>
+    <text class="t" x="840" y="112" font-size="38">📲</text>
+    <text class="t" x="840" y="147" font-size="19" font-weight="700" direction="rtl">لینک اشتراک + QR</text>
+    <text class="s" x="840" y="172">تحویل خودکار</text>
+  </g>
+
+  <g class="s" font-size="12">
+    <text x="237" y="108" style="font-size:12px">پرداخت</text>
+    <text x="462" y="108" style="font-size:12px">ساخت اکانت</text>
+    <text x="687" y="108" style="font-size:12px">تحویل</text>
+  </g>
+</svg>
