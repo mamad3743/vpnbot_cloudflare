@@ -9,21 +9,23 @@
   <img alt="Panels" src="https://img.shields.io/badge/Panels-Marzban%20%7C%20PasarGuard%20%7C%203x--ui-10B981?style=for-the-badge">
 </p>
 
-<p align="center">
+<p align="center" dir="rtl">
   فروش کانفیگ با <b>کیف‌پول</b>، <b>کارت‌به‌کارت</b>، <b>زیرمجموعه‌گیری</b> و <b>گردونه شانس</b><br>
-  اتصال خودکار به <b>Marzban / PasarGuard / 3x-ui (سنایی)</b> — همه‌چیز از داخل خود ربات مدیریت میشه ✨
+  اتصال خودکار به <b>Marzban / PasarGuard / 3x-ui (سنایی)</b> — همه‌چیز از داخل خود ربات مدیریت میشه
 </p>
 
 <p align="center">
-  <a href="#quickstart">🚀 راه‌اندازی سریع</a> ·
-  <a href="#important">⚠️ نکته‌های مهم</a> ·
-  <a href="#guide">📚 راهنمای کامل</a> ·
-  <a href="#security">🔐 امنیت</a>
+  <a href="#quickstart"><img src="assets/icons/rocket.svg" height="18" width="18" align="absmiddle" alt=""> راه‌اندازی سریع</a> ·
+  <a href="#important"><img src="assets/icons/warning.svg" height="18" width="18" align="absmiddle" alt=""> نکته‌های مهم</a> ·
+  <a href="#guide"><img src="assets/icons/book.svg" height="18" width="18" align="absmiddle" alt=""> راهنمای کامل</a> ·
+  <a href="#security"><img src="assets/icons/lock.svg" height="18" width="18" align="absmiddle" alt=""> امنیت</a>
 </p>
 
 <p align="center"><img src="assets/divider.svg" alt="" width="100%"></p>
 
-## ✨ قابلیت‌ها
+<div dir="rtl">
+
+## <img src="assets/icons/sparkles.svg" height="24" width="24" align="absmiddle" alt=""> قابلیت‌ها
 
 <p align="center">
   <img src="assets/features.svg" alt="قابلیت‌ها" width="100%">
@@ -31,16 +33,16 @@
 
 | بخش | توضیح |
 |---|---|
-| 🛒 خرید و تمدید | پلن ثابت یا **حجم دلخواه** (مشتری گیگ و روز رو انتخاب می‌کنه، قیمت خودکار حساب میشه)؛ تمدید واقعی روی همون اکانت پنل (ریست کامل از امروز) |
-| 🔎 اشتراک قبلی | مشتری اسم اشتراکی که **بیرون از ربات** خریده رو می‌زنه ← مصرف/انقضا و تمدید (با پلن ثابت یا حجم دلخواه) |
-| 🗂 دسته‌بندی | مثلا «تانل‌دار» و «بدون تانل»؛ مشتری اول دسته رو انتخاب می‌کنه، بعد پلن |
-| 📲 QR کد | همراه هر لینک اشتراک (ساخته‌شده داخل خود Worker، بدون سرویس بیرونی) |
-| 💳 پرداخت | کیف‌پول یا کارت‌به‌کارت با عکس رسید و تایید ادمین؛ کمیسیون زیرمجموعه‌گیری |
-| 🎨 ظاهر | رنگ دکمه‌ها (آبی/سبز/قرمز)، تغییر متن، خاموش/روشن کردن هر دکمه، متن قوانین با دکمه سبز تایید |
-| 📣 گزارش | گروه تاپیک‌دار: تست رایگان، رسیدها، خریدها، شارژ، کاربران جدید و خطاها |
-| 🛠 مدیریت | همه‌چیز از داخل ربات: پنل‌ها، محصولات، کاربران، آمار، پیام همگانی |
+| <img src="assets/icons/cart.svg" height="20" width="20" align="absmiddle" alt=""> خرید و تمدید | پلن ثابت یا **حجم دلخواه** (مشتری گیگ و روز رو انتخاب می‌کنه، قیمت خودکار حساب میشه)؛ تمدید واقعی روی همون اکانت پنل (ریست کامل از امروز) |
+| <img src="assets/icons/search.svg" height="20" width="20" align="absmiddle" alt=""> اشتراک قبلی | مشتری اسم اشتراکی که **بیرون از ربات** خریده رو می‌زنه ← مصرف/انقضا و تمدید (با پلن ثابت یا حجم دلخواه) |
+| <img src="assets/icons/folder.svg" height="20" width="20" align="absmiddle" alt=""> دسته‌بندی | مثلا «تانل‌دار» و «بدون تانل»؛ مشتری اول دسته رو انتخاب می‌کنه، بعد پلن |
+| <img src="assets/icons/phone.svg" height="20" width="20" align="absmiddle" alt=""> QR کد | همراه هر لینک اشتراک (ساخته‌شده داخل خود Worker، بدون سرویس بیرونی) |
+| <img src="assets/icons/card.svg" height="20" width="20" align="absmiddle" alt=""> پرداخت | کیف‌پول یا کارت‌به‌کارت با عکس رسید و تایید ادمین؛ کمیسیون زیرمجموعه‌گیری |
+| <img src="assets/icons/palette.svg" height="20" width="20" align="absmiddle" alt=""> ظاهر | رنگ دکمه‌ها (آبی/سبز/قرمز)، تغییر متن، خاموش/روشن کردن هر دکمه، متن قوانین با دکمه سبز تایید |
+| <img src="assets/icons/mega.svg" height="20" width="20" align="absmiddle" alt=""> گزارش | گروه تاپیک‌دار: تست رایگان، رسیدها، خریدها، شارژ، کاربران جدید و خطاها |
+| <img src="assets/icons/gear.svg" height="20" width="20" align="absmiddle" alt=""> مدیریت | همه‌چیز از داخل ربات: پنل‌ها، محصولات، کاربران، آمار، پیام همگانی |
 
-### 🔄 مسیر یک خرید
+### <img src="assets/icons/flow.svg" height="24" width="24" align="absmiddle" alt=""> مسیر یک خرید
 
 <p align="center">
   <img src="assets/flow.svg" alt="مسیر خرید" width="100%">
@@ -49,7 +51,7 @@
 <p align="center"><img src="assets/divider.svg" alt="" width="100%"></p>
 
 <a name="important"></a>
-## ⚠️ نکته‌های مهم
+## <img src="assets/icons/warning.svg" height="24" width="24" align="absmiddle" alt=""> نکته‌های مهم
 
 ### ۱) پنل باید روی «دامنه با SSL معتبر» باشه، نه IP
 Cloudflare Workers به آدرس IP خام وصل نمیشه (خطای ۱۰۰۳) و طبق منابعی که پیدا کردم پورت‌های غیراستاندارد (مثل ۸۰۰۰/۲۰۵۳) رو هم ممکنه نادیده بگیره.
@@ -67,9 +69,11 @@ Cloudflare Workers به آدرس IP خام وصل نمیشه (خطای ۱۰۰۳)
 <p align="center"><img src="assets/divider.svg" alt="" width="100%"></p>
 
 <a name="quickstart"></a>
-## 🚀 راه‌اندازی سریع
+## <img src="assets/icons/rocket.svg" height="24" width="24" align="absmiddle" alt=""> راه‌اندازی سریع
 
 ### نصب از صفر
+<div dir="ltr">
+
 ```powershell
 cd config-sales-bot
 wrangler d1 create config-sales-bot-db
@@ -80,13 +84,21 @@ wrangler secret put ADMIN_IDS
 wrangler secret put WEBHOOK_SECRET
 wrangler deploy
 ```
+
+</div>
 Webhook (یک‌بار):
+<div dir="ltr">
+
 ```
 https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<worker>.workers.dev/webhook/<WEBHOOK_SECRET>&allowed_updates=["message","callback_query","chat_member"]
 ```
 
+</div>
+
 ### ارتقا از نسخه‌های قبلی
 هر کدوم از فایل‌های زیر که **قبلا اجرا نکردی** رو به ترتیب و **هرکدوم فقط یک بار** اجرا کن، بعد دیپلوی:
+<div dir="ltr">
+
 ```powershell
 wrangler d1 execute config-sales-bot-db --remote --file=./migration_v2.sql   # اتصال به پنل‌ها
 wrangler d1 execute config-sales-bot-db --remote --file=./migration_v3.sql   # حجم دلخواه
@@ -94,19 +106,19 @@ wrangler d1 execute config-sales-bot-db --remote --file=./migration_v4.sql   # �
 wrangler d1 execute config-sales-bot-db --remote --file=./migration_v5.sql   # دسته‌بندی محصولات (اختیاری؛ ربات خودش جدول رو می‌سازه)
 wrangler deploy
 ```
+
+</div>
 (اگه یکی رو دوباره اجرا کنی ارور `duplicate column` می‌ده؛ بی‌خطره و یعنی قبلا اجرا شده. دقت کن `--remote` و `--file` **دو خط تیره** دارن.)
 قوانین، رنگ‌ها و تنظیمات ظاهر نیاز به مایگریشن ندارن.
-
----
 
 <p align="center"><img src="assets/divider.svg" alt="" width="100%"></p>
 
 <a name="guide"></a>
-## 📚 راهنمای کامل
-> هر بخش رو با کلیک باز کن 👇
+## <img src="assets/icons/book.svg" height="24" width="24" align="absmiddle" alt=""> راهنمای کامل
+> هر بخش رو با کلیک باز کن
 
 <details>
-<summary><b>🔌 پنل‌ها (از داخل ربات)</b></summary>
+<summary><img src="assets/icons/plug.svg" height="20" width="20" align="absmiddle" alt=""> <b>پنل‌ها (از داخل ربات)</b></summary>
 
 «🛠 پنل مدیریت ← 🔌 مدیریت پنل‌ها ← ➕ افزودن پنل». فیلدها با `|` جدا میشن (برای فیلد خالی `-`). بعد از ارسال، پیام حاوی رمز پاک میشه و تست اتصال اجرا میشه.
 
@@ -123,7 +135,7 @@ wrangler deploy
 </details>
 
 <details>
-<summary><b>🛒 محصولات</b></summary>
+<summary><img src="assets/icons/cart.svg" height="20" width="20" align="absmiddle" alt=""> <b>محصولات</b></summary>
 
 «🛒 مدیریت محصولات»:
 - **محصول عادی**: `نام | قیمت | مدت(روز)` → بعد «🔌 اتصال به پنل» و «📊 تنظیم حجم (گیگ)». بدون اتصال به پنل، کانفیگ‌ها دستی از انبار تحویل داده میشن.
@@ -134,7 +146,7 @@ wrangler deploy
 </details>
 
 <details>
-<summary><b>🗂 دسته‌بندی محصولات</b></summary>
+<summary><img src="assets/icons/folder.svg" height="20" width="20" align="absmiddle" alt=""> <b>دسته‌بندی محصولات</b></summary>
 
 مثلا دو پنل داری: یکی «تانل‌دار» و یکی «بدون تانل».
 1. ادمین: «🛒 مدیریت محصولات ← 🗂 دسته‌بندی‌ها ← ➕ افزودن دسته‌بندی» (مثلا `🚇 تانل‌دار` و `⚡️ بدون تانل`).
@@ -146,7 +158,7 @@ wrangler deploy
 </details>
 
 <details>
-<summary><b>🔎 اشتراک‌های خارج از ربات</b></summary>
+<summary><img src="assets/icons/search.svg" height="20" width="20" align="absmiddle" alt=""> <b>اشتراک‌های خارج از ربات</b></summary>
 
 مشتری دکمه «🔎 استعلام/تمدید اشتراک قبلی» رو می‌زنه و **اسم اشتراکش** (یوزرنیم روی پنل) رو می‌فرسته. ربات همه‌ی پنل‌های فعال رو جستجو می‌کنه و **وضعیت، مصرف، باقی‌مانده و انقضا** رو نشون میده.
 - **تمدید**: با پلن‌های عادی/فعالی که به **همون پنل** وصل کردی. ریست کامل: مصرف صفر و حجم/مدت جدید از امروز حساب میشه (روزهای باقی‌مانده‌ی قبلی اضافه نمیشن)؛ بقیه‌ی تنظیمات اکانت (flow، محدودیت IP، ...) دست‌نخورده می‌مونه. پرداخت: کیف‌پول یا کارت‌به‌کارت.
@@ -158,7 +170,7 @@ wrangler deploy
 </details>
 
 <details>
-<summary><b>📲 QR کد</b></summary>
+<summary><img src="assets/icons/phone.svg" height="20" width="20" align="absmiddle" alt=""> <b>QR کد</b></summary>
 
 همراه هر لینک (خرید، تمدید، تست) QR هم فرستاده میشه و زیر «سرویس‌های من» دکمه‌ی QR هست. QR **داخل خود Worker** ساخته میشه؛ لینک اشتراک هیچ‌وقت به سرویس بیرونی داده نمیشه.
 خاموش/روشن: «🔎 اشتراک قبلی و QR».
@@ -166,18 +178,16 @@ wrangler deploy
 </details>
 
 <details>
-<summary><b>🎨 شخصی‌سازی</b></summary>
+<summary><img src="assets/icons/palette.svg" height="20" width="20" align="absmiddle" alt=""> <b>شخصی‌سازی</b></summary>
 
 - **قوانین**: «📜 قوانین» ← ویرایش متن (HTML مجازه؛ متن نامعتبر ذخیره نمیشه)، متن دکمه، روشن/خاموش. هر کاربر قبل از هر کاری یک‌بار با دکمه‌ی **سبز** می‌پذیره (کاربرهای قبلی هم یک‌بار می‌پذیرن). ادمین‌ها مسدود نمیشن.
 - **دکمه‌ها**: «🎨 شخصی‌سازی دکمه‌ها» ← هر دکمه‌ی منو: تغییر متن، رنگ (آبی/سبز/قرمز/بدون رنگ) و **🔴 خاموش/روشن** (خاموش = از منو برداشته میشه و حتی با تایپ دستی/دکمه‌های قدیمی هم کار نمی‌کنه). رنگ دسته‌های دکمه‌های شیشه‌ای هم قابل تغییره.
 - تغییر متن/رنگ کیبورد برای هر کاربر از `/start` بعدی (یا اولین پیام همگانی) اعمال میشه؛ متن‌های قبلی همچنان کار می‌کنن.
 
----
-
 </details>
 
 <details>
-<summary><b>📣 گروه گزارش (تاپیک‌بندی خودکار)</b></summary>
+<summary><img src="assets/icons/mega.svg" height="20" width="20" align="absmiddle" alt=""> <b>گروه گزارش (تاپیک‌بندی خودکار)</b></summary>
 
 1. یه گروه بساز و توی تنظیماتش **Topics** رو روشن کن (گروه میشه فروم).
 2. ربات رو توی گروه اضافه کن و **ادمین** کن (دسترسی **Manage Topics** حتما).
@@ -192,11 +202,10 @@ wrangler deploy
 
 </details>
 
-
 <p align="center"><img src="assets/divider.svg" alt="" width="100%"></p>
 
 <a name="security"></a>
-## 🔐 امنیت و محدودیت‌ها
+## <img src="assets/icons/lock.svg" height="24" width="24" align="absmiddle" alt=""> امنیت و محدودیت‌ها
 
 ### امنیت
 - توکن‌ها و رمزها رو هیچ‌جا (حتی چت‌ها) منتشر نکن؛ هر توکنی که لو رفته رو عوض کن (BotFather ← Revoke، توکن API کلادفلر).
@@ -210,4 +219,6 @@ wrangler deploy
 - shadowsocks در سنایی برای *ساخت* کاربر جدید پشتیبانی نمیشه (تمدید اشتراک موجود شدنیه).
 - یادآوری خودکار انقضا/اتمام حجم هنوز نیست (با Cron Trigger قابل اضافه‌کردنه).
 
-<p align="center"><sub>ساخته‌شده برای Cloudflare Workers ⚡ — اگه خطایی دیدی، پیام خطای ربات رو همون‌طور که هست بفرست.</sub></p>
+</div>
+
+<p align="center"><sub>ساخته‌شده برای Cloudflare Workers — اگه خطایی دیدی، پیام خطای ربات رو همون‌طور که هست بفرست.</sub></p>
