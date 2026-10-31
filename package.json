@@ -1,0 +1,13 @@
+{
+  "name": "vpnbot-panel",
+  "version": "5.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ربات فروش کانفیگ VPN — Cloudflare Workers + Railway، با پنل وب",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node railway/server.js",
+    "build:ui": "node scripts/build-ui.mjs",
+    "deploy:cf": "wrangler deploy"
+  }
+}

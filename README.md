@@ -1,3 +1,51 @@
+# ربات فروش کانفیگ + پنل وب مدیریت
+
+این نسخه علاوه بر ربات اصلی این‌ها رو داره:
+
+- 🖥 **پنل وب** (`/panel`): داشبورد، سفارش‌ها و رسیدها (تایید/رد با دیدن عکس رسید)، کاربران و کیف پول، محصولات و انبار، پنل‌های VPN (با تست اتصال)، همه‌ی تنظیمات ربات (متن‌ها، دکمه‌ها، قوانین، گردونه، کانال‌ها، گروه گزارش)، پیام همگانی.
+- 📊 **مصرف**: روی Cloudflare مصرف Worker / KV / D1 از API کلادفلر؛ روی Railway منابع سرور و صف درخواست‌ها.
+- 💾 **بکاپ و بازیابی** کامل (دانلود JSON، ارسال به تلگرام، بکاپ خودکار، بازیابی با بکاپ ایمنی) — قابل انتقال بین Cloudflare و Railway.
+- ⚡ **بهینه‌ساز**: همه‌ی تنظیمات با یک کوئری + کش حافظه + (اختیاری) KV؛ روی Railway صف نرخ تلگرام، حذف آپدیت تکراری و صف ترتیبی هر کاربر.
+- 🚆 **استقرار روی Railway** با همون کد (SQLite روی Volume).
+
+## ورود به پنل
+1. داخل ربات (به‌عنوان ادمین) دستور `/panel` رو بفرست → لینک ورود یک‌بار مصرف (۵ دقیقه‌ای) می‌گیری.
+2. یا `PANEL_PASSWORD` رو ست کن و با رمز وارد شو.
+
+آدرس پنل = آدرس Worker/Railway + `/panel`
+
+## استقرار روی Cloudflare
+```bash
+wrangler d1 create config-sales-bot-db        # database_id رو در wrangler.toml بذار
+wrangler d1 execute config-sales-bot-db --remote --file=./schema.sql
+wrangler secret put BOT_TOKEN
+wrangler secret put ADMIN_IDS
+wrangler secret put WEBHOOK_SECRET
+wrangler secret put PANEL_PASSWORD            # اختیاری
+wrangler deploy
+```
+بعد آدرس Worker رو باز کن → ورود → «سیستم و استقرار» → «تنظیم وبهوک».
+
+**KV (اختیاری):** `wrangler kv namespace create CACHE` و بخش `[[kv_namespaces]]` رو در `wrangler.toml` فعال کن.
+**آمار مصرف (اختیاری):** توکن با دسترسی *Account Analytics: Read* بساز؛ `wrangler secret put CF_API_TOKEN` و `CF_ACCOUNT_ID`؛ و `D1_DATABASE_ID` / `KV_NAMESPACE_ID` رو در `[vars]` بذار.
+**بکاپ خودکار:** از پنل «بکاپ و بازیابی» روشنش کن (Cron هر ۶ ساعت اجرا میشه و بر اساس بازه‌ی انتخابی می‌فرسته).
+
+## استقرار روی Railway
+1. پروژه رو به GitHub بفرست → Railway → *Deploy from GitHub repo*.
+2. **Volume** بساز و روی مسیر `/data` وصلش کن (بدونش دیتابیس با هر دیپلوی پاک میشه).
+3. Variables: `BOT_TOKEN`، `ADMIN_IDS`، `WEBHOOK_SECRET`، `PANEL_PASSWORD`.
+4. Settings → Networking → *Generate Domain*. وبهوک خودکار تنظیم میشه.
+- نیازمند Node 22.13+ (در `nixpacks.toml` تنظیم شده). هیچ پکیج npm‌ای نیاز نیست.
+- اجرای محلی: `BOT_TOKEN=... ADMIN_IDS=... WEBHOOK_SECRET=... node railway/server.js`
+
+## انتقال بین دو پلتفرم
+از «بکاپ و بازیابی» روی مبدا بکاپ بگیر، روی مقصد همون صفحه فایل رو بازیابی کن (حالت «جایگزینی کامل»).
+
+## توسعه‌ی ظاهر پنل
+ظاهر در `src/web/panel.part*.html` است. بعد از تغییر: `node scripts/build-ui.mjs` (فایل `ui.generated.js` رو می‌سازه).
+
+---
+
 <p align="center">
   <img src="assets/banner.svg" alt="Config Sales Bot — ربات فروش کانفیگ VPN" width="100%">
 </p>

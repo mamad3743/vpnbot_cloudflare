@@ -1,0 +1,217 @@
+<script>
+"use strict";
+/* ============ ابزارها ============ */
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fa=n=>Number(n||0).toLocaleString("fa-IR");
+const nd=s=>String(s??"").replace(/[۰-۹]/g,d=>"۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g,d=>"٠١٢٣٤٥٦٧٨٩".indexOf(d));
+const toman=n=>fa(n)+" تومان";
+const dt=ms=>ms?new Date(Number(ms)).toLocaleString("fa-IR",{dateStyle:"medium",timeStyle:"short",timeZone:"Asia/Tehran"}):"—";
+const ago=ms=>{if(!ms)return"—";const s=Math.max(0,(Date.now()-ms)/1000);if(s<60)return"چند ثانیه پیش";if(s<3600)return fa(Math.floor(s/60))+" دقیقه پیش";if(s<86400)return fa(Math.floor(s/3600))+" ساعت پیش";return fa(Math.floor(s/86400))+" روز پیش"};
+const bytes=b=>{if(b==null)return"—";const u=["بایت","کیلوبایت","مگابایت","گیگابایت","ترابایت"];let i=0,n=Number(b);while(n>=1024&&i<4){n/=1024;i++}return fa(+n.toFixed(n<10&&i?1:0))+" "+u[i]};
+const dur=s=>{const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return d?`${fa(d)} روز و ${fa(h)} ساعت`:h?`${fa(h)} ساعت و ${fa(m)} دقیقه`:`${fa(m)} دقیقه`};
+const ic=(n,c="")=>`<svg class="ic ${c}"><use href="#i-${n}"/></svg>`;
+const uname=u=>u.username?"@"+u.username:(u.first_name||"کاربر");
+const debounce=(f,ms=300)=>{let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>f(...a),ms)}};
+
+function toast(msg,type="ok"){const el=document.createElement("div");el.className="toast "+type;el.innerHTML=ic(type==="ok"?"check":"alert")+"<span>"+esc(msg)+"</span>";$("#toasts").append(el);setTimeout(()=>el.remove(),type==="ok"?2600:5200)}
+
+async function api(path,{method="GET",body}={}){
+  const r=await fetch(path,{method,headers:{"content-type":"application/json","x-panel":"1"},body:body!==undefined?JSON.stringify(body):undefined,credentials:"same-origin"});
+  let j;try{j=await r.json()}catch{j={ok:false,error:"پاسخ نامعتبر از سرور"}}
+  if(r.status===401&&path!=="/api/me"){showLogin();throw new Error("نشست تموم شده؛ دوباره وارد شو")}
+  if(j.ok===false)throw new Error(j.error||"خطای ناشناخته");
+  return j;
+}
+async function busy(btn,fn){
+  if(btn){btn.disabled=true;btn._h=btn.innerHTML;btn.innerHTML='<span class="spin"></span>'}
+  try{return await fn()}catch(e){if(e.message!=="unauth")toast(e.message,"er")}finally{if(btn){btn.disabled=false;btn.innerHTML=btn._h}}
+}
+function openModal(title,html,buttons=[],{wide=false}={}){
+  const ov=document.createElement("div");ov.className="ov";
+  ov.innerHTML=`<div class="md ${wide?"wide":""}" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="md-h"><h2>${esc(title)}</h2><button class="btn ico" data-close aria-label="بستن">${ic("x")}</button></div><div class="md-b">${html}</div>${buttons.length?'<div class="md-f"></div>':""}</div>`;
+  document.body.append(ov);
+  const close=()=>{ov.remove();document.removeEventListener("keydown",esc_)};
+  const esc_=e=>{if(e.key==="Escape")close()};document.addEventListener("keydown",esc_);
+  ov.addEventListener("mousedown",e=>{if(e.target===ov)close()});
+  $("[data-close]",ov).onclick=close;
+  const f=$(".md-f",ov);
+  buttons.forEach(b=>{const el=document.createElement("button");el.className="btn "+(b.c||"");el.innerHTML=b.t;el.onclick=()=>b.f?busy(el,()=>b.f(close,ov)):close();f.append(el)});
+  const first=$("input,textarea,select",ov);if(first&&!matchMedia("(pointer:coarse)").matches)first.focus();
+  return {close,root:ov};
+}
+const confirmBox=(msg,okLabel="تایید",cls="bad")=>new Promise(res=>{let done=false;const m=openModal("تایید",`<p>${msg}</p>`,[{t:okLabel,c:cls,f:async c=>{done=true;c();res(true)}},{t:"انصراف",f:()=>{}}]);const o=new MutationObserver(()=>{if(!document.body.contains(m.root)){o.disconnect();if(!done)res(false)}});o.observe(document.body,{childList:true})});
+function formData(root){const o={};$$("[name]",root).forEach(el=>{if(el.type==="checkbox")o[el.name]=el.checked;else if(el.type==="radio"){if(el.checked)o[el.name]=el.value}else o[el.name]=el.value});return o}
+const field=(label,inner,hint="")=>`<label class="f"><span>${label}</span>${inner}${hint?`<small>${hint}</small>`:""}</label>`;
+const inp=(name,val="",o={})=>`<input type="${o.type||"text"}" name="${name}" value="${esc(val)}" ${o.ph?`placeholder="${esc(o.ph)}"`:""} ${o.num?'inputmode="decimal"':""} ${o.dir?`dir="${o.dir}"`:""} autocomplete="off">`;
+const sel=(name,opts,val)=>`<select name="${name}">${opts.map(([v,l])=>`<option value="${esc(v)}" ${String(v)===String(val)?"selected":""}>${esc(l)}</option>`).join("")}</select>`;
+const sw=(name,on,id="")=>`<span class="sw"><input type="checkbox" name="${name}" ${on?"checked":""} ${id?`id="${id}"`:""}><i></i></span>`;
+const empty=(t,i="box")=>`<div class="empty">${ic(i)}<div>${t}</div></div>`;
+const skel=n=>Array.from({length:n},()=>'<div class="skel"></div>').join("");
+const STATUS={awaiting_receipt:["منتظر رسید","wa"],pending:["در انتظار تایید","wa"],processing:["در حال پردازش","vi"],approved:["تایید شده","ok"],rejected:["رد شده","er"]};
+const OTYPE={purchase:"خرید",topup:"شارژ کیف پول",renew:"تمدید"};
+const chip=(t,c="")=>`<span class="chip ${c}">${t}</span>`;
+function pager(page,total,size,act){const pages=Math.ceil(total/size);if(pages<=1)return"";return `<div class="pager"><button class="btn sm" data-a="${act}" data-p="${page-1}" ${page<=1?"disabled":""}>قبلی</button><span>صفحه ${fa(page)} از ${fa(pages)}</span><button class="btn sm" data-a="${act}" data-p="${page+1}" ${page>=pages?"disabled":""}>بعدی</button></div>`}
+function head(title,desc,actions=""){return `<div class="ph"><div><h1 class="pt">${title}</h1>${desc?`<div class="pd">${desc}</div>`:""}</div><div class="sp"></div><div style="display:flex;gap:8px;flex-wrap:wrap">${actions}</div></div>`}
+
+/* ============ قالب و مسیریابی ============ */
+let ME=null;
+const NAV=[["dashboard","داشبورد","dash"],["panels","پنل‌های VPN","server"],["products","محصولات و تعرفه‌ها","cart"],["orders","رسیدها و سفارش‌ها","receipt"],["usage","بهینه‌ساز و مصرف","bolt"],["users","کاربران و کیف‌پول","users"],["backup","بکاپ و بازیابی","db"],["system","سیستم و استقرار","cloud"],["settings","تنظیمات ربات","sliders"]];
+const PAGES={};
+function showLogin(){
+  document.body.classList.remove("nav");
+  $("#root").innerHTML=`<div class="login"><div class="card"><div class="logo">${ic("shield").replace('class="ic ','style="width:28px;height:28px" class="ic ')}</div><h1>پنل مدیریت ربات</h1><p id="lp"></p><form id="lf">${ME&&ME.passwordLogin?`<label class="f"><span>رمز پنل</span><input type="password" name="password" autocomplete="current-password" required></label><button class="btn pri" style="width:100%;justify-content:center">ورود</button>`:""}</form><div class="note" style="margin-top:14px;text-align:right">${ME&&ME.passwordLogin?"یا داخل ربات تلگرام دستور <b class=mono>/panel</b> رو بفرست تا لینک ورود یک‌بار مصرف بگیری.":"داخل ربات تلگرام دستور <b class=mono>/panel</b> رو بفرست تا لینک ورود یک‌بار مصرف بگیری. (برای ورود با رمز، متغیر PANEL_PASSWORD رو ست کن.)"}</div></div></div>`;
+  const f=$("#lf");if(f)f.onsubmit=async e=>{e.preventDefault();const b=$("button",f);await busy(b,async()=>{await api("/api/login",{method:"POST",body:{password:f.password.value}});boot()})};
+}
+function shell(){
+  $("#root").innerHTML=`<div id="shell"><div class="scrim" data-a="nav"></div>
+  <aside><div class="brand"><div class="logo">${ic("shield")}</div><div><b>کانفیگ‌بات</b><small>پنل مدیریت</small></div></div>
+    <div class="status"><span class="dot"></span><div><div>${ME.runtime==="railway"?"اجرا روی Railway":"اجرا روی Cloudflare"}</div><small style="color:var(--mut)">نسخه ${esc(ME.version)}</small></div></div>
+    <nav>${NAV.map(([k,l,i])=>`<a data-a="go" data-k="${k}" href="#/${k}">${ic(i)}<span>${l}</span>${k==="orders"?'<span class="badge" id="pb" hidden></span>':""}</a>`).join("")}</nav>
+    <div class="side-foot"><span>${ME.user?"ورود از تلگرام":"ورود با رمز"}</span><button class="btn sm" data-a="logout">${ic("out")}خروج</button></div></aside>
+  <div class="main"><header class="top"><button class="btn ico menu-btn" data-a="nav" aria-label="منو">${ic("menu")}</button>
+    <div class="pills"><span class="pill">${ME.kv?"KV فعال":"بدون KV"}</span><span class="pill hide-m">نرخ کش تنظیمات: <b class="num" id="hr">—</b></span></div><div class="sp"></div>
+    <button class="btn amb2" data-a="quickbackup">${ic("down")}<span class="hide-m">بکاپ سریع</span></button></header>
+  <main id="view"></main></div></div>`;
+}
+async function route(){
+  const k=(location.hash.replace(/^#\/?/,"")||"dashboard").split("?")[0];
+  const key=PAGES[k]?k:"dashboard";
+  $$("nav a").forEach(a=>a.classList.toggle("on",a.dataset.k===key));
+  document.body.classList.remove("nav");
+  const v=$("#view");v.innerHTML=`<div class="grid g4">${skel(4)}</div>`;
+  try{await PAGES[key](v)}catch(e){if(e.message!=="unauth")v.innerHTML=`<div class="card">${empty("خطا: "+esc(e.message),"alert")}</div>`}
+  window.scrollTo(0,0);
+}
+async function refreshHeader(){try{const u=await api("/api/usage?lite=1");const o=u.optimizer,t=o.memHit+o.kvHit+o.dbLoad;$("#hr").textContent=t?fa(Math.round((o.memHit+o.kvHit)/t*100))+"٪":"—"}catch{}}
+
+/* ============ کنش‌ها (delegation) ============ */
+const A={};
+document.addEventListener("click",e=>{const el=e.target.closest("[data-a]");if(!el)return;const f=A[el.dataset.a];if(f){e.preventDefault();f(el,e)}});
+A.nav=()=>document.body.classList.toggle("nav");
+A.go=()=>document.body.classList.remove("nav");
+A.logout=async()=>{await api("/api/logout",{method:"POST"}).catch(()=>{});ME=null;boot()};
+A.quickbackup=el=>busy(el,downloadBackup);
+
+/* ============ داشبورد ============ */
+function smooth(p){let d=`M${p[0][0]},${p[0][1]}`;for(let i=0;i<p.length-1;i++){const a=p[i-1]||p[i],b=p[i],c=p[i+1],e=p[i+2]||c;d+=` C${b[0]+(c[0]-a[0])/6},${b[1]+(c[1]-a[1])/6} ${c[0]-(e[0]-b[0])/6},${c[1]-(e[1]-b[1])/6} ${c[0]},${c[1]}`}return d}
+function salesChart(series){
+  const W=800,H=240,pad=18,B=210,n=series.length;
+  const mx=Math.max(1,...series.map(s=>s.sum)),mc=Math.max(1,...series.map(s=>s.count));
+  const X=i=>W-pad-i*((W-2*pad)/(n-1)); // قدیمی‌ترین سمت راست (جهت خوانش فارسی)
+  const P=(f,m)=>series.map((s,i)=>[X(i),B-(s[f]/m)*(B-24)]);
+  const ps=P("sum",mx),pc=P("count",mc);
+  const area=pth=>`${pth} L${ps[n-1][0]},${B} L${ps[0][0]},${B}Z`;
+  const lab=series.map((s,i)=>i%2===0?`<text x="${X(i)}" y="${H-4}" fill="#988d9f" font-size="11" text-anchor="middle">${new Date(s.day+43200000).toLocaleDateString("fa-IR",{day:"numeric",month:"short",timeZone:"Asia/Tehran"})}</text>`:"").join("");
+  const dots=series.map((s,i)=>`<circle cx="${ps[i][0]}" cy="${ps[i][1]}" r="9" fill="transparent"><title>${new Date(s.day+43200000).toLocaleDateString("fa-IR",{dateStyle:"medium",timeZone:"Asia/Tehran"})} — ${toman(s.sum)} (${fa(s.count)} سفارش)</title></circle>`).join("");
+  const peak=series.reduce((a,b)=>b.sum>a.sum?b:a,series[0]),pi=series.indexOf(peak);
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="نمودار فروش ۱۴ روز اخیر">
+  <defs><linearGradient id="gv" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#a855f7" stop-opacity=".5"/><stop offset=".7" stop-color="#8b5cf6" stop-opacity=".12"/><stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/></linearGradient></defs>
+  ${[50,100,150].map(y=>`<line x1="0" x2="${W}" y1="${y}" y2="${y}" stroke="#3e3759" stroke-opacity=".45" stroke-dasharray="4 4"/>`).join("")}<line x1="0" x2="${W}" y1="${B}" y2="${B}" stroke="#4d436a" stroke-opacity=".6"/>
+  <path d="${smooth(pc)}" fill="none" stroke="#f59e0b" stroke-width="2.2" stroke-linecap="round" style="filter:drop-shadow(0 0 5px rgba(245,158,11,.55))"/>
+  <path d="${area(smooth(ps))}" fill="url(#gv)"/><path d="${smooth(ps)}" fill="none" stroke="#c084fc" stroke-width="3" stroke-linecap="round" style="filter:drop-shadow(0 0 7px rgba(192,132,252,.7))"/>
+  ${peak.sum>0?`<circle cx="${ps[pi][0]}" cy="${ps[pi][1]}" r="5.5" fill="#fbbf24" style="filter:drop-shadow(0 0 9px #f59e0b)"/>`:""}${dots}${lab}</svg>`;
+}
+function ring(pct,label,sub,color){
+  const R=34,C=2*Math.PI*R,p=Math.min(100,Math.max(0,pct||0)),col=color||(p>=85?"#ef4444":p>=60?"#fbbf24":"#c084fc");
+  return `<div class="ringw"><svg class="ring" viewBox="0 0 84 84"><circle class="bg" cx="42" cy="42" r="${R}"/><circle class="fg" cx="42" cy="42" r="${R}" stroke="${col}" stroke-dasharray="${C}" stroke-dashoffset="${C*(1-p/100)}" style="filter:drop-shadow(0 0 5px ${col}88)"/></svg><div><div class="pc num">${fa(Math.round(p))}٪</div><div>${label}</div><div class="pd" style="font-size:12px">${sub}</div></div></div>`;
+}
+const pct=(v,l)=>l?v/l*100:0;
+function usageRings(u){
+  if(u.runtime==="railway"){const n=u.node||{};return `<div class="gr3">
+    ${ring(n.heapTotal?pct(n.heapUsed,n.heapTotal):0,"حافظه (Heap)",bytes(n.rss)+" RSS","#c084fc")}
+    ${n.disk?ring(pct(n.disk.total-n.disk.free,n.disk.total),"فضای Volume",bytes(n.dbBytes)+" دیتابیس"):ring(0,"فضای Volume","نامشخص")}
+    <div class="kv" style="align-self:center"><dt>آپ‌تایم</dt><dd>${dur(n.uptime||0)}</dd><dt>کلید KV</dt><dd>${fa(n.kv?.keys)}</dd><dt>صف تلگرام</dt><dd>${fa(n.optimizer?.tgSent)} ارسال</dd></div></div>`}
+  const c=u.cf;if(!c)return `<div class="note">برای دیدن مصرف روزانه‌ی Worker/KV/D1 توکن API کلادفلر رو اضافه کن؛ راهنما: بخش «بهینه‌ساز و مصرف».</div>`;
+  const L=c.limits,w=c.worker?.today,k=c.kv?.today,d=c.d1?.today;
+  return `<div class="gr3">${w?ring(pct(w.requests,L.workerRequestsDay),"درخواست Worker",fa(w.requests)+" از "+fa(L.workerRequestsDay)):""}${d?ring(pct(d.rowsRead,L.d1RowsReadDay),"ردیف خوانده‌شده D1",fa(d.rowsRead)+" از "+fa(L.d1RowsReadDay)):""}${k?ring(pct(k.read,L.kvReadsDay),"خواندن KV",fa(k.read)+" از "+fa(L.kvReadsDay)):""}</div>${!w&&!d&&!k?`<div class="warn">${esc(Object.values(c.errors||{})[0]||"داده‌ای برنگشت")}</div>`:""}`;
+}
+PAGES.dashboard=async v=>{
+  const o=await api("/api/overview");const U=o.users,O=o.orders;
+  const pb=$("#pb");if(pb){pb.hidden=!O.pending;pb.textContent=fa(O.pending)}
+  v.innerHTML=head("داشبورد","وضعیت لحظه‌ای فروش، کاربران و منابع",`<button class="btn" data-a="refresh">${ic("refresh")}به‌روزرسانی</button>`)+`
+  <div class="grid g4">
+    <div class="card kpi"><div class="l">فروش امروز ${ic("wallet")}</div><div class="v num">${fa(O.rev_today)}<small>تومان</small></div><div class="s">${fa(O.cnt_today)} سفارش تایید‌شده${O.topup_today?` · شارژ ${toman(O.topup_today)}`:""}</div></div>
+    <div class="card kpi am"><div class="l">در انتظار تایید ${ic("receipt")}</div><div class="v num">${fa(O.pending)}<small>رسید</small></div><div class="s">${O.pending?"منتظر تصمیم شماست":"همه رسیدگی شده"}</div></div>
+    <div class="card kpi"><div class="l">کاربران ${ic("users")}</div><div class="v num">${fa(U.reg)}<small>ثبت‌نام‌شده</small></div><div class="s">${fa(U.new_today)} جدید امروز · ${fa(U.active24)} فعال در ۲۴ ساعت</div></div>
+    <div class="card kpi gr"><div class="l">فروش ۳۰ روز ${ic("db")}</div><div class="v num">${fa(O.rev_30)}<small>تومان</small></div><div class="s">۷ روز اخیر: ${toman(O.rev_7)}</div></div>
+  </div>
+  <div class="grid g21" style="margin-top:16px">
+    <div class="card"><h3>${ic("bolt")}روند فروش ۱۴ روز اخیر</h3><div style="display:flex;gap:16px;margin:-4px 0 6px;font-size:12.5px;color:var(--tx2)"><span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#c084fc;margin-left:6px"></i>مبلغ فروش</span><span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#f59e0b;margin-left:6px"></i>تعداد سفارش</span></div>${salesChart(o.series)}</div>
+    <div class="card"><h3>${ic("receipt")}رسیدهای در انتظار</h3>${o.pending.length?`<div class="list">${o.pending.map(r=>`<div class="it"><div class="main-c"><div class="t">${toman(r.amount)} <span class="m">· ${OTYPE[r.type]||r.type}</span></div><div class="m">${esc(uname(r))} · ${esc(r.pname||"")}</div></div><div class="acts">${r.has_receipt?`<button class="btn sm ico" data-a="receipt" data-id="${r.id}" aria-label="رسید">${ic("image")}</button>`:""}<button class="btn sm ok" data-a="approve" data-id="${r.id}">${ic("check")}</button><button class="btn sm bad" data-a="reject" data-id="${r.id}">${ic("x")}</button></div></div>`).join("")}</div>`:empty("رسید در انتظاری نیست","check")}</div>
+  </div>
+  <div class="grid g2" style="margin-top:16px">
+    <div class="card"><h3>${ic("bolt")}مصرف منابع</h3><div id="um">${skel(1)}</div></div>
+    <div class="card"><h3>${ic("alert")}هشدارها</h3>${alerts(o)}</div>
+  </div>`;
+  api("/api/usage").then(u=>{const m=$("#um");if(m)m.innerHTML=usageRings(u)}).catch(e=>{const m=$("#um");if(m)m.innerHTML=`<div class="warn">${esc(e.message)}</div>`});
+  refreshHeader();
+};
+function alerts(o){
+  const a=[];
+  if(!o.counts.panels&&o.counts.products)a.push(["wa","هیچ پنل VPN فعالی نیست؛ محصولات پنلی تحویل خودکار ندارن."]);
+  o.lowStock.forEach(p=>a.push(["er",`موجودی «${esc(p.name)}» رو به اتمامه (${fa(p.avail)} عدد).`]));
+  if(!o.counts.products)a.push(["wa","هنوز محصولی فعال نداری."]);
+  if(U_BANNED(o))a.push(["vi",`${fa(o.users.banned)} کاربر مسدوده.`]);
+  return a.length?`<div class="list">${a.map(([c,t])=>`<div class="it"><span class="chip ${c}">${c==="er"?"فوری":c==="wa"?"توجه":"اطلاع"}</span><div class="main-c">${t}</div></div>`).join("")}</div>`:empty("همه‌چیز مرتبه","check");
+}
+const U_BANNED=o=>o.users.banned>0;
+A.refresh=()=>route();
+A.approve=el=>orderAct(el,"approve");
+A.reject=async el=>{if(await confirmBox("رد این رسید؟ به کاربر اطلاع داده میشه.","رد کردن"))orderAct(el,"reject")};
+async function orderAct(el,act){await busy(el,async()=>{await api(`/api/orders/${el.dataset.id}/${act}`,{method:"POST"});toast(act==="approve"?"تایید شد و تحویل داده شد":"رد شد");route()})}
+A.receipt=el=>{openModal("رسید سفارش #"+fa(el.dataset.id),`<img src="/api/orders/${el.dataset.id}/receipt" alt="رسید" style="width:100%;border-radius:12px;background:var(--s2);min-height:120px" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'warn',textContent:'عکس رسید از تلگرام گرفته نشد (ممکنه منقضی شده باشه).'}))">`,[],{wide:true})};
+
+/* ============ سفارش‌ها ============ */
+const OQ={status:"pending",type:"",q:"",page:1};
+PAGES.orders=async v=>{
+  v.innerHTML=head("رسیدها و سفارش‌ها","تایید و رد رسیدها، پیگیری خرید و تمدید")+`
+  <div class="tabs" id="ot">${[["pending","در انتظار"],["","همه"],["approved","تایید‌شده"],["rejected","ردشده"],["awaiting_receipt","منتظر رسید"]].map(([s,l])=>`<span class="tab ${OQ.status===s?"on":""}" data-a="ofilter" data-s="${s}" tabindex="0">${l}</span>`).join("")}</div>
+  <div class="row3" style="margin-bottom:14px"><input type="search" id="oq" placeholder="جستجو: شماره سفارش، آیدی یا نام کاربر" value="${esc(OQ.q)}">${sel("type",[["","همه نوع‌ها"],["purchase","خرید"],["renew","تمدید"],["topup","شارژ کیف پول"]],OQ.type)}</div><div id="ol">${skel(4)}</div>`;
+  $("#oq").oninput=debounce(e=>{OQ.q=e.target.value;OQ.page=1;loadOrders()});
+  $("[name=type]",v).onchange=e=>{OQ.type=e.target.value;OQ.page=1;loadOrders()};
+  loadOrders();
+};
+async function loadOrders(){
+  const j=await api(`/api/orders?status=${OQ.status}&type=${OQ.type}&q=${encodeURIComponent(OQ.q)}&page=${OQ.page}`);const el=$("#ol");if(!el)return;
+  el.innerHTML=(j.rows.length?`<div class="list">${j.rows.map(r=>{const[s,c]=STATUS[r.status]||[r.status,""];return `<div class="it"><div class="main-c"><div class="t">#${fa(r.id)} · ${toman(r.amount)}</div><div class="m"><a href="#" data-a="user" data-id="${r.user_id}">${esc(uname(r))}</a> · ${OTYPE[r.type]||r.type}${r.pname?" · "+esc(r.pname):""}${r.gb?` · ${fa(r.gb)} گیگ`:""}${r.days?` · ${fa(r.days)} روز`:""}</div><div class="m">${dt(r.created_at)}</div></div>${chip(s,c)}<div class="acts">${r.has_receipt?`<button class="btn sm" data-a="receipt" data-id="${r.id}">${ic("image")}رسید</button>`:""}${r.status==="pending"?`<button class="btn sm ok" data-a="approve" data-id="${r.id}">${ic("check")}تایید</button><button class="btn sm bad" data-a="reject" data-id="${r.id}">${ic("x")}رد</button>`:""}</div></div>`}).join("")}</div>`:empty("سفارشی پیدا نشد","receipt"))+pager(j.page,j.total,j.size,"opage");
+}
+A.ofilter=el=>{OQ.status=el.dataset.s;OQ.page=1;$$("#ot .tab").forEach(t=>t.classList.toggle("on",t===el));loadOrders()};
+A.opage=el=>{OQ.page=+el.dataset.p;loadOrders()};
+
+/* ============ کاربران ============ */
+const UQ={f:"",q:"",page:1};
+PAGES.users=async v=>{
+  v.innerHTML=head("کاربران و کیف‌پول","جستجو، مسدودسازی، تغییر موجودی و پیام",`<button class="btn pri" data-a="broadcast">${ic("send")}پیام همگانی</button>`)+`
+  <div class="tabs" id="ut">${[["","همه"],["banned","مسدودها"],["rich","دارای موجودی"]].map(([s,l])=>`<span class="tab ${UQ.f===s?"on":""}" data-a="ufilter" data-s="${s}" tabindex="0">${l}</span>`).join("")}</div>
+  <input type="search" id="uq" placeholder="جستجو: آیدی عددی، یوزرنیم یا نام" value="${esc(UQ.q)}" style="margin-bottom:14px"><div id="ul">${skel(4)}</div>`;
+  $("#uq").oninput=debounce(e=>{UQ.q=e.target.value;UQ.page=1;loadUsers()});loadUsers();
+};
+async function loadUsers(){
+  const j=await api(`/api/users?f=${UQ.f}&q=${encodeURIComponent(UQ.q)}&page=${UQ.page}`);const el=$("#ul");if(!el)return;
+  el.innerHTML=(j.rows.length?`<div class="list">${j.rows.map(u=>`<div class="it"><div class="main-c"><div class="t">${esc(u.first_name||"—")} ${u.username?`<span class="m">@${esc(u.username)}</span>`:""}</div><div class="m"><span class="mono">${u.id}</span> · آخرین فعالیت ${ago(u.last_seen)}</div></div>${u.is_banned?chip("مسدود","er"):""}${u.registered?"":chip("ثبت‌نام ناقص","wa")}<span class="chip vi num">${toman(u.wallet_balance)}</span><button class="btn sm" data-a="user" data-id="${u.id}">مدیریت</button></div>`).join("")}</div>`:empty("کاربری پیدا نشد","users"))+pager(j.page,j.total,j.size,"upage");
+}
+A.ufilter=el=>{UQ.f=el.dataset.s;UQ.page=1;$$("#ut .tab").forEach(t=>t.classList.toggle("on",t===el));loadUsers()};
+A.upage=el=>{UQ.page=+el.dataset.p;loadUsers()};
+A.user=async el=>{
+  const j=await api("/api/users/"+el.dataset.id).catch(e=>toast(e.message,"er"));if(!j)return;const u=j.user;
+  const m=openModal("کاربر "+(u.first_name||u.id),`
+  <div class="kv" style="margin-bottom:14px"><dt>آیدی</dt><dd class="mono">${u.id}</dd><dt>یوزرنیم</dt><dd>${u.username?"@"+esc(u.username):"—"}</dd><dt>موجودی</dt><dd id="wb">${toman(u.wallet_balance)}</dd><dt>زیرمجموعه</dt><dd>${fa(u.referral_count)} نفر</dd><dt>عضویت</dt><dd>${dt(u.joined_at)}</dd><dt>آخرین فعالیت</dt><dd>${dt(u.last_seen)}</dd></div>
+  <h3 style="font-size:14px;margin:6px 0 8px">تغییر موجودی</h3><div class="row2">${field("مبلغ (تومان)",inp("amt","",{num:1,ph:"مثلا ۵۰۰۰۰"}))}${field("نوع",sel("dir",[["+","افزایش"],["-","کاهش"]],"+"))}</div><div class="sr" style="padding-top:0"><span>اطلاع به کاربر در تلگرام</span>${sw("notify",true)}</div><button class="btn pri" data-w>${ic("wallet")}اعمال</button>
+  <h3 style="font-size:14px;margin:18px 0 8px">پیام به کاربر</h3>${field("",`<textarea name="msg" placeholder="متن پیام (HTML تلگرام مجازه)"></textarea>`)}<button class="btn" data-m>${ic("send")}ارسال</button>
+  <h3 style="font-size:14px;margin:18px 0 8px">آخرین سفارش‌ها</h3>${j.orders.length?`<div class="list">${j.orders.map(o=>{const[s,c]=STATUS[o.status]||[o.status,""];return `<div class="it" style="padding:7px 12px"><div class="main-c"><span class="t">#${fa(o.id)}</span> <span class="m">${OTYPE[o.type]||o.type} · ${toman(o.amount)}${o.pname?" · "+esc(o.pname):""}</span></div>${chip(s,c)}</div>`}).join("")}</div>`:'<div class="m">سفارشی نداره</div>'}`,
+  [{t:u.is_banned?ic("check")+"رفع مسدودی":ic("ban")+"مسدود کردن",c:u.is_banned?"ok":"bad",f:async c=>{await api(`/api/users/${u.id}/ban`,{method:"POST",body:{banned:!u.is_banned}});toast(u.is_banned?"رفع مسدودی شد":"مسدود شد");c();if($("#ul"))loadUsers()}}],{wide:true});
+  $("[data-w]",m.root).onclick=ev=>busy(ev.currentTarget,async()=>{const f=formData(m.root),n=Number(nd(f.amt));if(!n||n<=0)throw new Error("مبلغ معتبر وارد کن");const r=await api(`/api/users/${u.id}/wallet`,{method:"POST",body:{delta:f.dir==="-"?-n:n,notify:f.notify}});$("#wb",m.root).textContent=toman(r.balance);toast("موجودی به‌روز شد")});
+  $("[data-m]",m.root).onclick=ev=>busy(ev.currentTarget,async()=>{const t=$("[name=msg]",m.root).value;await api(`/api/users/${u.id}/message`,{method:"POST",body:{text:t}});$("[name=msg]",m.root).value="";toast("ارسال شد")});
+};
+A.broadcast=async()=>{
+  const m=openModal("پیام همگانی",`${field("متن پیام",`<textarea name="text" style="min-height:140px" placeholder="متن (HTML تلگرام: b, i, a, code ...)"></textarea>`,"به همه‌ی کاربران ثبت‌نام‌شده و غیرمسدود ارسال میشه. ارسال تکه‌تکه انجام میشه تا به سقف‌های Worker نخوره؛ تا پایان کار این پنجره رو نبند.")}<div id="bp" hidden><div class="bar"><i id="bf" style="width:0"></i></div><div class="pd" id="bt" style="margin-top:6px"></div></div>`,
+  [{t:ic("send")+"ارسال به همه",c:"pri",f:async()=>{
+    const text=$("[name=text]",m.root).value.trim();if(!text)throw new Error("متن خالیه");
+    if(!await confirmBox("ارسال برای همه‌ی کاربران؟ این کار برگشت‌پذیر نیست.","ارسال","pri"))return;
+    $("#bp",m.root).hidden=false;let off=0,sent=0,failed=0,total=0;
+    for(;;){const r=await api("/api/broadcast",{method:"POST",body:{text,offset:off,limit:30}});if(r.total!==undefined)total=r.total;sent+=r.sent;failed+=r.failed;off=r.next;
+      $("#bf",m.root).style.width=(total?Math.min(100,off/total*100):100)+"%";$("#bt",m.root).textContent=`${fa(off)} از ${fa(total)} — موفق ${fa(sent)}، ناموفق ${fa(failed)}`;if(r.done)break}
+    toast(`ارسال تموم شد: ${fa(sent)} موفق، ${fa(failed)} ناموفق`)}},
+   {t:"تست روی خودم",f:async()=>{await api("/api/broadcast",{method:"POST",body:{text:$("[name=text]",m.root).value,test:true}});toast("برای خودت ارسال شد")}}]);
+};

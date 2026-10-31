@@ -5,11 +5,13 @@
  * زیرمجموعه‌گیری با کمیسیون، گردونه شانس، عضویت اجباری، پنل مدیریت کامل دکمه‌ای.
  *
  * ENV (secret): BOT_TOKEN, ADMIN_IDS (کاما جدا), WEBHOOK_SECRET
- * Binding: DB (D1)
+ * Binding: DB (D1)  |  اختیاری: KV (کش تنظیمات) + پنل وب (/panel)
  */
 
-import { PANEL_TYPES, hydratePanel, randomId, isIpHost, customPort, panelCreateUser, panelUsage, panelRenew, panelTest, panelFindUser, panelRenewExisting, ownsSubscription } from "./panels.js";
+import { PANEL_TYPES, hydratePanel, randomId, isIpHost, customPort, panelCreateUser, panelUsage, panelRenew, panelTest, panelFindUser, panelRenewExisting, ownsSubscription, clearPanelCache } from "./panels.js";
 import { qrPng } from "./qr.js";
+import { getSettingCached, setSettingCached } from "./web/optimizer.js";
+import { handleWeb, runScheduled, setOrigin, createLoginLink } from "./web/api.js";
 
 const TG = (token) => `https://api.telegram.org/bot${token}`;
 
@@ -214,13 +216,10 @@ async function touchUser(env, tgUser) {
 
 // ---------- تنظیمات عمومی ----------
 async function getSetting(env, key, fallback = "") {
-  const row = await env.DB.prepare("SELECT value FROM settings WHERE key=?").bind(key).first();
-  return row ? row.value : fallback;
+  return getSettingCached(env, key, fallback);
 }
 async function setSetting(env, key, value) {
-  await env.DB.prepare(
-    `INSERT INTO settings (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`
-  ).bind(key, value).run();
+  await setSettingCached(env, key, value);
 }
 
 // ---------- وضعیت موقت (state machine) ----------
@@ -975,6 +974,22 @@ async function handleMessage(env, message) {
   const rulesNeeded = await needsRules(env, cfg, userId);
   if (rulesNeeded && !text.startsWith("/start") && !isAdmin(env, userId)) {
     await sendRules(env, chatId, cfg);
+    return;
+  }
+
+  // ---------- لینک ورود به پنل وب (فقط ادمین‌ها) ----------
+  if (isAdmin(env, userId) && /^\/panel(@\w+)?$/i.test(text)) {
+    const link = await createLoginLink(env, userId);
+    if (!link) {
+      await sendMessage(env, chatId, "⚠️ آدرس عمومی Worker مشخص نیست. یک‌بار آدرس پنل رو توی مرورگر باز کن و دوباره /panel بزن.");
+    } else {
+      await sendMessage(
+        env,
+        chatId,
+        `🖥 <b>پنل وب</b>\nلینک ورود یک‌بار مصرفه و ۵ دقیقه اعتبار داره:\n${link}`,
+        { disable_web_page_preview: true }
+      );
+    }
     return;
   }
 
@@ -3471,46 +3486,76 @@ async function handleChatMemberUpdate(env, cm) {
 }
 
 // ---------- Worker entry ----------
+// توابع داخلی که پنل وب ازشون استفاده می‌کنه (بدون وابستگی چرخشی)
+export const internals = {
+  sendMessage, tgCall, rawCall, tgUpload, escapeHtml, fmtMoney, isAdmin, reasonText,
+  getSetting, setSetting, loadUiCfg, saveUiCfg, getLogCfg, saveLogCfg, logEvent, getUser,
+  fulfillOrder, ensureCatSchema, getPanel, defaultWheelPrizes, getWheelPrizes,
+  MENU_ITEMS, LOG_TOPICS, DEFAULT_RULES_TEXT, DEFAULT_RULES_BTN, VALID_STYLES, mainMenuKeyboard,
+  logUserTag, PANEL_TYPES, panelTest, isIpHost, hydratePanel, clearPanelCache,
+};
+
+async function handleWebhook(request, env) {
+  let update;
+  try {
+    update = await request.json();
+  } catch {
+    return new Response("bad request", { status: 400 });
+  }
+  await processUpdate(env, update);
+  return new Response("ok");
+}
+
+// یک آپدیت تلگرام رو پردازش می‌کنه (روی Railway هم مستقیم صدا زده میشه)
+export async function processUpdate(env, update) {
+  try {
+    if (update.message) {
+      await handleMessage(env, update.message);
+    } else if (update.callback_query) {
+      await handleCallback(env, update.callback_query);
+    } else if (update.chat_member) {
+      await handleChatMemberUpdate(env, update.chat_member);
+    }
+  } catch (err) {
+    console.error("handler error", err);
+    const from = update.message?.from || update.callback_query?.from;
+    if (from && isAdmin(env, from.id)) {
+      const cid = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
+      if (cid) await sendMessage(env, cid, `⚠️ خطا:\n<code>${escapeHtml(String(err?.message || err)).slice(0, 500)}</code>`).catch(() => {});
+    }
+    await logEvent(
+      env,
+      "errors",
+      `🔥 <b>خطای ربات</b>${from ? `\n👤 <code>${from.id}</code>` : ""}${update.callback_query?.data ? `\n🔘 <code>${escapeHtml(update.callback_query.data)}</code>` : ""}\n<code>${escapeHtml(String(err?.message || err)).slice(0, 600)}</code>`
+    );
+  }
+}
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    setOrigin(env, url.origin);
 
     if (request.method === "GET" && url.pathname === "/health") {
       return new Response("ok");
     }
 
-    if (request.method === "POST" && url.pathname === `/webhook/${env.WEBHOOK_SECRET}`) {
-      let update;
-      try {
-        update = await request.json();
-      } catch {
-        return new Response("bad request", { status: 400 });
-      }
+    if (request.method === "POST" && env.WEBHOOK_SECRET && url.pathname === `/webhook/${env.WEBHOOK_SECRET}`) {
+      // روی Railway آپدیت‌ها از صف بهینه‌ساز رد میشن (env.WEBHOOK_HOOK)
+      if (typeof env.WEBHOOK_HOOK === "function") return env.WEBHOOK_HOOK(request, (u) => processUpdate(env, u));
+      return handleWebhook(request, env);
+    }
 
-      try {
-        if (update.message) {
-          await handleMessage(env, update.message);
-        } else if (update.callback_query) {
-          await handleCallback(env, update.callback_query);
-        } else if (update.chat_member) {
-          await handleChatMemberUpdate(env, update.chat_member);
-        }
-      } catch (err) {
-        console.error("handler error", err);
-        const from = update.message?.from || update.callback_query?.from;
-        if (from && isAdmin(env, from.id)) {
-          const cid = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
-          if (cid) await sendMessage(env, cid, `⚠️ خطا:\n<code>${escapeHtml(String(err?.message || err)).slice(0, 500)}</code>`).catch(() => {});
-        }
-        await logEvent(
-          env,
-          "errors",
-          `🔥 <b>خطای ربات</b>${from ? `\n👤 <code>${from.id}</code>` : ""}${update.callback_query?.data ? `\n🔘 <code>${escapeHtml(update.callback_query.data)}</code>` : ""}\n<code>${escapeHtml(String(err?.message || err)).slice(0, 600)}</code>`
-        );
-      }
-      return new Response("ok");
+    if (url.pathname === "/" ) return Response.redirect(`${url.origin}/panel`, 302);
+    if (url.pathname === "/panel" || url.pathname.startsWith("/panel/") || url.pathname.startsWith("/api/")) {
+      return handleWeb(request, env, ctx, internals);
     }
 
     return new Response("not found", { status: 404 });
+  },
+
+  // Cron Trigger: بکاپ خودکار روی تلگرام (اگه از پنل روشن شده باشه) + پاکسازی
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runScheduled(env, internals));
   },
 };

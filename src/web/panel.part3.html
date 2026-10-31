@@ -1,0 +1,226 @@
+/* ============ محصولات ============ */
+const PT={tab:"products"};
+PAGES.products=async v=>{
+  const [p,c,pn]=await Promise.all([api("/api/products"),api("/api/categories"),api("/api/vpnpanels")]);
+  PT.products=p.rows;PT.cats=c.rows;PT.panels=pn.rows;
+  v.innerHTML=head("محصولات و تعرفه‌ها","پلن‌های فروش، حجم دلخواه، تست رایگان و انبار کانفیگ",`<button class="btn" data-a="catnew">${ic("plus")}دسته‌بندی</button><button class="btn pri" data-a="pnew">${ic("plus")}محصول جدید</button>`)+`
+  <div class="tabs">${[["products","محصولات"],["cats","دسته‌بندی‌ها"]].map(([k,l])=>`<span class="tab ${PT.tab===k?"on":""}" data-a="ptab" data-k="${k}" tabindex="0">${l}</span>`).join("")}</div><div id="pl"></div>`;
+  drawProducts();
+};
+function drawProducts(){
+  const el=$("#pl");if(!el)return;
+  if(PT.tab==="cats"){el.innerHTML=PT.cats.length?`<div class="list">${PT.cats.map(c=>`<div class="it"><div class="main-c"><div class="t">${esc(c.name)}</div><div class="m">${fa(c.products)} محصول · ترتیب ${fa(c.sort_order)}</div></div>${c.enabled?chip("فعال","ok"):chip("غیرفعال","")}<div class="acts"><button class="btn sm" data-a="catedit" data-id="${c.id}">${ic("edit")}ویرایش</button><button class="btn sm bad" data-a="catdel" data-id="${c.id}">${ic("trash")}</button></div></div>`).join("")}</div>`:empty("دسته‌بندی نداری. مثلا «تانل‌دار» و «بدون تانل» بساز.","box");return}
+  el.innerHTML=PT.products.length?`<div class="list">${PT.products.map(p=>{
+    const stock=p.panel_id?chip("تحویل خودکار: "+esc(p.panel_name||"؟"),"vi"):p.custom?"":chip(`انبار: ${fa(p.avail)} آزاد / ${fa(p.used)} فروخته`,p.avail<=3?"er":"ok");
+    return `<div class="it" style="${p.enabled?"":"opacity:.55"}"><div class="main-c"><div class="t">${esc(p.name)} ${p.is_trial?chip("تست رایگان","wa"):""} ${p.custom?chip("حجم دلخواه","vi"):""}</div><div class="m">${p.custom?`${fa(p.custom.min_gb)}–${fa(p.custom.max_gb)} گیگ · ${fa(p.custom.min_days)}–${fa(p.custom.max_days)} روز · هر گیگ ${toman(p.custom.price_per_gb)}`:`${toman(p.price)} · ${fa(p.duration_days)} روز${p.data_limit_gb?` · ${fa(p.data_limit_gb)} گیگ`:p.panel_id?" · نامحدود":""}`}${p.category_name?" · "+esc(p.category_name):""}</div></div>${stock}<div class="acts">${!p.panel_id&&!p.custom?`<button class="btn sm" data-a="pcfg" data-id="${p.id}">${ic("box")}کانفیگ‌ها</button>`:""}<button class="btn sm" data-a="pedit" data-id="${p.id}">${ic("edit")}</button><button class="btn sm bad" data-a="pdel" data-id="${p.id}">${ic("trash")}</button></div></div>`}).join("")}</div>`:empty("هنوز محصولی نساختی.","cart");
+}
+A.ptab=el=>{PT.tab=el.dataset.k;$$(".tab").forEach(t=>t.classList.toggle("on",t===el));drawProducts()};
+function productForm(p){
+  p=p||{enabled:1,duration_days:30,price:0,data_limit_gb:0};const cu=p.custom||{min_gb:5,max_gb:200,min_days:30,max_days:365,price_per_gb:2000,price_per_day:0};
+  const panelsOpt=[["","بدون پنل (تحویل دستی از انبار)"],...PT.panels.map(x=>[x.id,x.name+(x.enabled?"":" (غیرفعال)")])];
+  const catOpt=[["","بدون دسته"],...PT.cats.map(x=>[x.id,x.name])];
+  return `${field("نام محصول",inp("name",p.name||"",{ph:"مثلا ۳۰ گیگ یک‌ماهه"}))}
+  <div class="sr"><div>حجم دلخواه<small>مشتری گیگ و روز رو خودش انتخاب می‌کنه و قیمت خودکار حساب میشه (حتما به پنل وصل کن)</small></div>${sw("is_custom",!!p.custom)}</div>
+  <div id="pf-fixed" style="margin-top:12px"><div class="row3">${field("قیمت (تومان)",inp("price",p.price,{num:1}))}${field("مدت (روز)",inp("duration_days",p.duration_days,{num:1}))}${field("حجم (گیگ)",inp("data_limit_gb",p.data_limit_gb||0,{num:1}),"فقط پنلی؛ ۰ = نامحدود")}</div></div>
+  <div id="pf-custom" style="margin-top:12px" hidden><div class="row2">${field("حداقل گیگ",inp("min_gb",cu.min_gb,{num:1}))}${field("حداکثر گیگ",inp("max_gb",cu.max_gb,{num:1}))}</div><div class="row2">${field("حداقل روز",inp("min_days",cu.min_days,{num:1}))}${field("حداکثر روز",inp("max_days",cu.max_days,{num:1}))}</div><div class="row2">${field("قیمت هر گیگ",inp("price_per_gb",cu.price_per_gb,{num:1}))}${field("قیمت هر روز",inp("price_per_day",cu.price_per_day||0,{num:1}),"اختیاری")}</div></div>
+  <div class="row2">${field("اتصال به پنل",sel("panel_id",panelsOpt,p.panel_id||""))}${field("دسته‌بندی",sel("category_id",catOpt,p.category_id||""))}</div>
+  ${field("توضیحات",`<textarea name="description" style="min-height:70px">${esc(p.description||"")}</textarea>`)}
+  <div class="sr"><span>فعال (قابل نمایش برای مشتری)</span>${sw("enabled",p.enabled!==0)}</div>
+  <div class="sr"><div>تست رایگان<small>فقط یک محصول می‌تونه تست رایگان باشه؛ قیمتش رو ۰ بذار</small></div>${sw("is_trial",!!p.is_trial)}</div>`;
+}
+function openProduct(p){
+  const m=openModal(p?"ویرایش محصول":"محصول جدید",productForm(p),[{t:"ذخیره",c:"pri",f:async c=>{
+    const f=formData(m.root);const b={id:p?.id,name:f.name,description:f.description,enabled:f.enabled,is_trial:f.is_trial,panel_id:f.panel_id||null,category_id:f.category_id||null};
+    if(f.is_custom)b.custom={min_gb:nd(f.min_gb),max_gb:nd(f.max_gb),min_days:nd(f.min_days),max_days:nd(f.max_days),price_per_gb:nd(f.price_per_gb),price_per_day:nd(f.price_per_day||0)};
+    else{b.price=nd(f.price);b.duration_days=nd(f.duration_days);b.data_limit_gb=nd(f.data_limit_gb||0)}
+    await api("/api/products",{method:"POST",body:b});toast("ذخیره شد");c();route()}}],{wide:true});
+  const t=()=>{const on=$("[name=is_custom]",m.root).checked;$("#pf-fixed",m.root).hidden=on;$("#pf-custom",m.root).hidden=!on};$("[name=is_custom]",m.root).onchange=t;t();
+}
+A.pnew=()=>openProduct();
+A.pedit=el=>openProduct(PT.products.find(x=>x.id==el.dataset.id));
+A.pdel=async el=>{if(await confirmBox("این محصول و کانفیگ‌های انبارش حذف بشه؟"))await busy(null,async()=>{await api("/api/products/"+el.dataset.id,{method:"DELETE"});toast("حذف شد");route()})};
+A.pcfg=async el=>{
+  const id=el.dataset.id,load=async()=>{const j=await api(`/api/products/${id}/configs`);const box=$("#cl",m.root);box.innerHTML=j.rows.length?`<div class="list">${j.rows.map(r=>`<div class="it" style="padding:6px 10px"><span class="mono m" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:380px">${esc(r.config_text)}</span>${r.is_used?chip("فروخته","")+"":`<button class="btn sm bad" data-del="${r.id}">${ic("trash")}</button>`}</div>`).join("")}</div>`:'<div class="m">انبار خالیه</div>';$$("[data-del]",box).forEach(b=>b.onclick=()=>busy(b,async()=>{await api("/api/configs/"+b.dataset.del,{method:"DELETE"});load()}))};
+  const m=openModal("انبار کانفیگ",`${field("افزودن کانفیگ (هر خط یک کانفیگ)",`<textarea name="t" class="mono" style="min-height:110px" placeholder="vless://...\nvless://..."></textarea>`)}<button class="btn pri" data-add>${ic("plus")}افزودن به انبار</button><h3 style="font-size:14px;margin:18px 0 8px">موجودی (۲۰۰ مورد اول)</h3><div id="cl">${skel(1)}</div>`,[],{wide:true});
+  $("[data-add]",m.root).onclick=e=>busy(e.currentTarget,async()=>{const r=await api(`/api/products/${id}/configs`,{method:"POST",body:{text:$("[name=t]",m.root).value}});$("[name=t]",m.root).value="";toast(fa(r.added)+" کانفیگ اضافه شد");load()});
+  load();
+};
+function catModal(c){const m=openModal(c?"ویرایش دسته":"دسته‌بندی جدید",field("نام",inp("name",c?.name||"",{ph:"مثلا 🚇 تانل‌دار"}))+field("ترتیب نمایش",inp("sort_order",c?.sort_order||0,{num:1}))+`<div class="sr"><span>فعال</span>${sw("enabled",c?c.enabled!==0:true)}</div>`,[{t:"ذخیره",c:"pri",f:async cl=>{const f=formData(m.root);await api("/api/categories",{method:"POST",body:{id:c?.id,name:f.name,sort_order:nd(f.sort_order),enabled:f.enabled}});toast("ذخیره شد");cl();PT.tab="cats";route()}}])}
+A.catnew=()=>catModal();A.catedit=el=>catModal(PT.cats.find(x=>x.id==el.dataset.id));
+A.catdel=async el=>{if(await confirmBox("دسته حذف بشه؟ محصولاتش حذف نمیشن و «بدون دسته» میشن."))await busy(null,async()=>{await api("/api/categories/"+el.dataset.id,{method:"DELETE"});toast("حذف شد");PT.tab="cats";route()})};
+
+/* ============ پنل‌های VPN ============ */
+PAGES.panels=async v=>{
+  const j=await api("/api/vpnpanels");PT.panels=j.rows;PT.ptypes=j.types;
+  v.innerHTML=head("پنل‌های VPN","اتصال به Marzban، PasarGuard و 3x-ui برای ساخت خودکار سرویس",`<button class="btn pri" data-a="vpnew">${ic("plus")}پنل جدید</button>`)+
+  `<div class="note" style="margin-bottom:14px">برای هر پنل یک ادمین جدا بساز، نه ادمین اصلی. روی Cloudflare آدرس پنل باید دامنه با SSL باشه؛ IP خام کار نمی‌کنه.</div>`+
+  (j.rows.length?`<div class="grid g2">${j.rows.map(p=>`<div class="card"><div style="display:flex;gap:10px;align-items:center;margin-bottom:8px"><div class="logo" style="width:38px;height:38px;border-radius:11px">${ic("server")}</div><div style="flex:1;min-width:0"><div class="t" style="font-weight:700">${esc(p.name)}</div><div class="m mono" style="color:var(--mut);font-size:12px;overflow:hidden;text-overflow:ellipsis">${esc(p.base_url)}</div></div>${p.enabled?chip("فعال","ok"):chip("غیرفعال","")}</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${chip(esc(j.types[p.type]||p.type),"vi")}${chip(fa(p.products)+" محصول","")}${p.has_token?chip("توکن API",""):""}</div><div class="acts" style="display:flex;gap:6px"><button class="btn sm ok" data-a="vptest" data-id="${p.id}">${ic("plug")}تست اتصال</button><button class="btn sm" data-a="vpedit" data-id="${p.id}">${ic("edit")}ویرایش</button><button class="btn sm bad" data-a="vpdel" data-id="${p.id}">${ic("trash")}</button></div></div>`).join("")}</div>`:`<div class="card">${empty("هنوز پنلی وصل نکردی.","server")}</div>`);
+};
+function vpForm(p){
+  p=p||{type:"marzban",enabled:1,extra:{}};const x=p.extra||{};
+  return `<div class="row2">${field("نوع پنل",p.id?`<input type="text" value="${esc(PT.ptypes[p.type])}" disabled><input type="hidden" name="type" value="${p.type}">`:sel("type",Object.entries(PT.ptypes),p.type))}${field("نام",inp("name",p.name||"",{ph:"مثلا هتزنر آلمان"}))}</div>
+  ${field("آدرس پنل",inp("base_url",p.base_url||"",{ph:"https://panel.example.com",dir:"ltr"}),"سنایی: آدرس کامل با مسیر مخفی")}
+  <div class="row2">${field("یوزرنیم",inp("username",p.username||"",{dir:"ltr"}))}${field("پسورد",inp("password","",{type:"password",ph:p.id&&p.has_password?"بدون تغییر":""}))}</div>
+  ${field("آدرس ساب",inp("sub_base",x.sub_base||"",{dir:"ltr",ph:"https://sub.example.com:2096/sub"}),"سنایی: الزامی. بقیه: اختیاری")}
+  <div class="row2" data-t="marzban">${field("پروتکل‌ها",inp("protocols",(x.protocols||[]).join(","),{dir:"ltr",ph:"vless,vmess"}),"پیش‌فرض vless")}${field("flow",inp("flow",x.flow||"",{dir:"ltr",ph:"xtls-rprx-vision"}),"برای Reality")}</div>
+  <div data-t="pasarguard">${field("آیدی گروه‌ها",inp("group_ids",(x.group_ids||[]).join(","),{dir:"ltr",ph:"1,2"}),"خالی = همه‌ی گروه‌ها")}</div>
+  <div data-t="sanaei">${field("آیدی اینباند",inp("inbound_id",x.inbound_id||"",{num:1}))}${field("توکن API (اختیاری)",inp("api_token","",{type:"password",ph:p.has_token?"بدون تغییر":""}))}</div>
+  <div class="sr"><span>فعال</span>${sw("enabled",p.enabled!==0)}</div>`;
+}
+function openVp(p){
+  const m=openModal(p?"ویرایش پنل":"پنل جدید",vpForm(p),[{t:"ذخیره",c:"pri",f:async c=>{
+    const f=formData(m.root);await api("/api/vpnpanels",{method:"POST",body:{id:p?.id,type:f.type,name:f.name,base_url:f.base_url,username:f.username,password:f.password,api_token:f.api_token,enabled:f.enabled,extra:{sub_base:f.sub_base,flow:f.flow,protocols:f.protocols,group_ids:f.group_ids,inbound_id:nd(f.inbound_id)}}});
+    toast("ذخیره شد");c();route()}}],{wide:true});
+  const t=()=>{const ty=$("[name=type]",m.root).value;$$("[data-t]",m.root).forEach(e=>{e.hidden=e.dataset.t!==ty})};
+  t();$("[name=type]",m.root).onchange=t;
+}
+A.vpnew=()=>openVp();A.vpedit=el=>openVp(PT.panels.find(x=>x.id==el.dataset.id));
+A.vpdel=async el=>{if(await confirmBox("پنل حذف بشه؟ محصولات متصل بهش «بدون پنل» میشن."))await busy(null,async()=>{await api("/api/vpnpanels/"+el.dataset.id,{method:"DELETE"});toast("حذف شد");route()})};
+A.vptest=el=>busy(el,async()=>{const r=await api(`/api/vpnpanels/${el.dataset.id}/test`,{method:"POST"});toast("✅ "+r.message)});
+
+/* ============ بهینه‌ساز و مصرف ============ */
+PAGES.usage=async v=>{
+  const u=await api("/api/usage"),o=u.optimizer,tot=o.memHit+o.kvHit+o.dbLoad,hit=tot?Math.round((o.memHit+o.kvHit)/tot*100):0;
+  let h=head("بهینه‌ساز و مصرف",u.runtime==="railway"?"منابع سرور Railway و صف درخواست‌ها":"مصرف Worker، KV و D1 کلادفلر",`<button class="btn" data-a="usagefresh">${ic("refresh")}تازه‌سازی</button>`);
+  h+=`<div class="grid g2"><div class="card"><h3>${ic("bolt")}کش تنظیمات (بهینه‌ساز)</h3><div class="grid g2" style="align-items:center">${ring(hit,"نرخ برخورد کش",fa(o.memHit+o.kvHit)+" از "+fa(tot)+" خواندن","#c084fc")}<dl class="kv"><dt>بارگذاری از دیتابیس</dt><dd>${fa(o.dbLoad)}</dd><dt>خواندن از KV</dt><dd>${fa(o.kvHit)}</dd><dt>نوشتن در KV</dt><dd>${fa(o.kvWrite)}</dd><dt>خطای KV</dt><dd>${fa(o.kvErr)}</dd><dt>ابطال کش</dt><dd>${fa(o.invalidations)}</dd></dl></div>
+  <p class="pd" style="margin:12px 0">همه‌ی تنظیمات با «یک» کوئری خونده و ۱۵ ثانیه توی حافظه نگه‌داشته میشه؛ ${u.kvBound?"یک نسخه‌ی مشترک هم توی KV هست و فقط موقع تغییر تنظیمات نوشته میشه.":"KV وصل نیست و کش فقط توی حافظه‌ست."} آمار از آخرین راه‌اندازی Worker شمرده میشه.</p><button class="btn" data-a="cacheclear">پاک‌کردن کش</button></div>`;
+  if(u.runtime==="railway"){const n=u.node||{},z=n.optimizer||{};
+    h+=`<div class="card"><h3>${ic("server")}سرور Railway</h3><dl class="kv"><dt>آپ‌تایم</dt><dd>${dur(n.uptime||0)}</dd><dt>حافظه (RSS)</dt><dd>${bytes(n.rss)}</dd><dt>Heap</dt><dd>${bytes(n.heapUsed)} / ${bytes(n.heapTotal)}</dd><dt>بار CPU</dt><dd>${(n.load||0).toFixed(2)} (${fa(n.cpus)} هسته)</dd><dt>دیتابیس SQLite</dt><dd>${bytes(n.dbBytes)}</dd><dt>فضای Volume</dt><dd>${n.disk?bytes(n.disk.free)+" آزاد از "+bytes(n.disk.total):"—"}</dd><dt>Node</dt><dd>${esc(n.node)}</dd><dt>سرویس</dt><dd>${esc(n.railway?.service||"—")} · ${esc(n.railway?.region||"—")}</dd></dl>${n.persistent?"":'<div class="warn" style="margin-top:10px">Volume وصل نیست؛ با هر دیپلوی دیتابیس پاک میشه. یک Volume روی <span class="mono">/data</span> بساز.</div>'}</div>
+    </div><div class="grid g2" style="margin-top:16px"><div class="card"><h3>${ic("send")}بهینه‌ساز درخواست‌های خروجی</h3><dl class="kv"><dt>درخواست‌های خروجی</dt><dd>${fa(z.outbound)}</dd><dt>ارسال به تلگرام</dt><dd>${fa(z.tgSent)}</dd><dt>تلاش مجدد بعد از 429</dt><dd>${fa(z.tg429)}</dd><dt>انتظار در صف نرخ</dt><dd>${fa(z.tgQueued)}</dd><dt>ادغام GET های هم‌زمان</dt><dd>${fa(z.coalesced)}</dd><dt>تایم‌اوت</dt><dd>${fa(z.timeouts)}</dd></dl><p class="pd" style="margin-top:10px">سقف نرخ ~۲۵ پیام در ثانیه و فاصله‌ی کوتاه برای هر چت؛ روی خطای Flood تلگرام خودکار صبر و دوباره ارسال می‌کنه.</p></div>
+    <div class="card"><h3>${ic("users")}آپدیت‌های ورودی و KV</h3><dl class="kv"><dt>آپدیت دریافتی</dt><dd>${fa(z.updates)}</dd><dt>تکراری حذف‌شده</dt><dd>${fa(z.dupes)}</dd><dt>حداکثر صف هم‌زمان</dt><dd>${fa(z.queueMax)}</dd><dt>کلیدهای KV</dt><dd>${fa(n.kv?.keys)}</dd><dt>KV خواندن / نوشتن</dt><dd>${fa(n.kv?.reads)} / ${fa(n.kv?.writes)}</dd><dt>برخورد حافظه‌ی KV</dt><dd>${fa(n.kv?.memHits)}</dd></dl><p class="pd" style="margin-top:10px">هر کاربر صف ترتیبی داره (جلوگیری از تداخل مراحل)، و آپدیت تکراری تلگرام دوبار اجرا نمیشه.</p></div></div>`;
+  } else {
+    h+=`<div class="card"><h3>${ic("db")}داده‌های ربات</h3><dl class="kv">${Object.entries(u.tables||{}).map(([k,n])=>`<dt>${k}</dt><dd>${fa(n)}</dd>`).join("")}</dl></div></div>`;
+    const c=u.cf;
+    if(!c){h+=`<div class="card" style="margin-top:16px"><h3>${ic("cloud")}اتصال به آمار کلادفلر</h3><p class="pd" style="margin-bottom:12px">برای دیدن مصرف روزانه‌ی Worker، KV و D1 (و درصد نسبت به سقف پلن رایگان) یک توکن فقط‌خواندنی لازمه:</p><ol class="steps"><li>داشبورد کلادفلر ← My Profile ← API Tokens ← Create Token ← Custom token با دسترسی <b>Account ← Account Analytics ← Read</b>.</li><li>در ترمینال: <div class="code" style="margin-top:6px">wrangler secret put CF_API_TOKEN\nwrangler secret put CF_ACCOUNT_ID</div></li><li>در <span class="mono">wrangler.toml</span> بخش <span class="mono">[vars]</span> مقدار <span class="mono">D1_DATABASE_ID</span> و (اگه KV داری) <span class="mono">KV_NAMESPACE_ID</span> رو بذار و دوباره <span class="mono">wrangler deploy</span> بزن.</li></ol></div>`}
+    else{const L=c.limits,w=c.worker,k=c.kv,d=c.d1;
+      h+=`<div class="grid g3" style="margin-top:16px">
+      <div class="card"><h3>${ic("cloud")}Worker امروز</h3>${w?`${ring(pct(w.today.requests,L.workerRequestsDay),"درخواست",fa(w.today.requests)+" از "+fa(L.workerRequestsDay))}<dl class="kv" style="margin-top:12px"><dt>خطا</dt><dd>${fa(w.today.errors)}</dd><dt>Subrequest</dt><dd>${fa(w.today.subrequests)}</dd><dt>CPU میانه / P99</dt><dd>${w.cpuP50!=null?(w.cpuP50/1000).toFixed(1):"—"} / ${w.cpuP99!=null?(w.cpuP99/1000).toFixed(1):"—"} ms</dd><dt>۷ روز اخیر</dt><dd>${fa(w.week.requests)} درخواست</dd></dl>`:err_(c.errors.worker)}</div>
+      <div class="card"><h3>${ic("bolt")}KV امروز</h3>${k?`${ring(pct(k.today.read,L.kvReadsDay),"خواندن",fa(k.today.read)+" از "+fa(L.kvReadsDay))}<dl class="kv" style="margin-top:12px"><dt>نوشتن</dt><dd>${fa(k.today.write)} از ${fa(L.kvWritesDay)}</dd><dt>حذف / لیست</dt><dd>${fa(k.today.delete)} / ${fa(k.today.list)}</dd><dt>حجم</dt><dd>${bytes(k.bytes)}</dd><dt>تعداد کلید</dt><dd>${fa(k.keys)}</dd></dl>`:err_(c.errors.kv,"KV_NAMESPACE_ID ست نشده یا KV وصل نیست")}</div>
+      <div class="card"><h3>${ic("db")}D1 امروز</h3>${d?`${ring(pct(d.today.rowsRead,L.d1RowsReadDay),"ردیف خوانده‌شده",fa(d.today.rowsRead)+" از "+fa(L.d1RowsReadDay))}<dl class="kv" style="margin-top:12px"><dt>ردیف نوشته‌شده</dt><dd>${fa(d.today.rowsWritten)} از ${fa(L.d1RowsWrittenDay)}</dd><dt>کوئری خواندن / نوشتن</dt><dd>${fa(d.today.readQueries)} / ${fa(d.today.writeQueries)}</dd><dt>حجم دیتابیس</dt><dd>${bytes(d.bytes)}</dd></dl>`:err_(c.errors.d1,"D1_DATABASE_ID ست نشده")}</div></div>
+      <p class="pd" style="margin-top:10px">آمار کلادفلر بر اساس UTC و با چند دقیقه تاخیره؛ هر ۵ دقیقه یک‌بار گرفته میشه (آخرین دریافت: ${ago(c.at)}). سقف‌ها مربوط به پلن رایگانه.</p>`}
+  }
+  v.innerHTML=h+(u.runtime==="railway"?"":"");
+};
+const err_=(e,fallback="")=>`<div class="warn">${esc(e||fallback||"داده‌ای نیست")}</div>`;
+A.usagefresh=el=>busy(el,async()=>{await api("/api/usage?fresh=1&lite=1");await route()});
+A.cacheclear=el=>busy(el,async()=>{await api("/api/cache/clear",{method:"POST"});toast("کش پاک شد");route()});
+
+/* ============ بکاپ و بازیابی ============ */
+const BK_ORDER=["settings","categories","panels","products","configs","users","orders","referrals","channels","exit_logs","ext_services"];
+async function downloadBackup(onp){
+  const meta=await api("/api/backup/meta");const out={format:"vpnbot-backup",version:1,created_at:Date.now(),runtime:meta.runtime,tables:{}};let done=0;const total=meta.tables.reduce((n,t)=>n+t.rows,0)||1;
+  for(const t of meta.tables){const rows=[];let cols=[];for(let off=0;;off+=500){const j=await api(`/api/backup/table?name=${t.name}&offset=${off}&limit=500`);cols=j.columns;rows.push(...j.rows);done+=j.rows.length;onp&&onp(done/total,t.name);if(j.done)break}out.tables[t.name]={columns:cols,rows}}
+  const blob=new Blob([JSON.stringify(out)],{type:"application/json"}),a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);a.download=`vpnbot-backup-${new Date().toISOString().slice(0,16).replace(/[:T]/g,"-")}.json`;document.body.append(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000);
+  toast("بکاپ دانلود شد");return out;
+}
+PAGES.backup=async v=>{
+  const [meta,st]=await Promise.all([api("/api/backup/meta"),api("/api/settings")]);const S=st.simple;
+  v.innerHTML=head("بکاپ و بازیابی",`همه‌ی داده‌های ربات (کاربران، سفارش‌ها، محصولات، پنل‌ها و تنظیمات) — ${meta.runtime==="railway"?"SQLite":"D1"}`)+`
+  <div class="grid g2"><div class="card"><h3>${ic("down")}گرفتن بکاپ</h3><p class="pd" style="margin-bottom:12px">فایل JSON کامل. شامل رمز پنل‌های VPN هم هست؛ جای امن نگهش دار.</p><div class="bar" id="bkbar" hidden><i style="width:0"></i></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="btn pri" data-a="bkdl">${ic("down")}دانلود بکاپ</button><button class="btn" data-a="bktg">${ic("send")}ارسال به تلگرام ادمین‌ها</button></div>
+    <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:12px"><div class="sr"><div>بکاپ خودکار روی تلگرام<small>فایل برای ادمین‌ها ارسال میشه${meta.runtime==="railway"?"":" (نیازمند Cron Trigger در wrangler.toml)"}</small></div>${sw("auto",S.auto_backup==="1","auto")}</div>
+    <div class="sr"><span>هر چند ساعت</span><select id="every" style="width:auto">${[[6,"۶ ساعت"],[12,"۱۲ ساعت"],[24,"روزانه"],[72,"۳ روز"],[168,"هفتگی"]].map(([h,l])=>`<option value="${h}" ${S.backup_every_h==h?"selected":""}>${l}</option>`).join("")}</select></div></div></div>
+  <div class="card"><h3>${ic("up")}بازیابی از فایل بکاپ</h3><div class="drop" id="drop" tabindex="0">فایل <span class="mono">.json</span> بکاپ رو اینجا بنداز یا کلیک کن<input type="file" id="bkfile" accept=".json,application/json" hidden></div><div id="rs" style="margin-top:12px"></div></div></div>
+  <div class="card" style="margin-top:16px"><h3>${ic("db")}محتوای فعلی</h3><dl class="kv">${meta.tables.map(t=>`<dt>${t.name}</dt><dd>${fa(t.rows)} ردیف</dd>`).join("")}</dl></div>`;
+  const save=()=>api("/api/settings",{method:"POST",body:{simple:{auto_backup:$("#auto").checked?"1":"0",backup_every_h:$("#every").value}}}).then(()=>toast("ذخیره شد")).catch(e=>toast(e.message,"er"));
+  $("#auto").onchange=save;$("#every").onchange=save;
+  const drop=$("#drop"),inpf=$("#bkfile");drop.onclick=()=>inpf.click();drop.onkeydown=e=>{if(e.key==="Enter")inpf.click()};
+  drop.ondragover=e=>{e.preventDefault();drop.classList.add("on")};drop.ondragleave=()=>drop.classList.remove("on");drop.ondrop=e=>{e.preventDefault();drop.classList.remove("on");if(e.dataTransfer.files[0])readBackup(e.dataTransfer.files[0])};inpf.onchange=()=>inpf.files[0]&&readBackup(inpf.files[0]);
+};
+A.bkdl=el=>busy(el,async()=>{const b=$("#bkbar");b.hidden=false;await downloadBackup(p=>{$("i",b).style.width=p*100+"%"});setTimeout(()=>b.hidden=true,1200)});
+A.bktg=el=>busy(el,async()=>{const r=await api("/api/backup/telegram",{method:"POST"});toast(`برای ${fa(r.sent)} ادمین ارسال شد`)});
+async function readBackup(file){
+  let d;try{d=JSON.parse(await file.text())}catch{return toast("فایل JSON معتبر نیست","er")}
+  if(d.format!=="vpnbot-backup"||!d.tables)return toast("این فایل بکاپ این ربات نیست","er");
+  const names=BK_ORDER.filter(n=>d.tables[n]);
+  $("#rs").innerHTML=`<div class="note"><b>${esc(file.name)}</b> · ${dt(d.created_at)} · ${d.runtime==="railway"?"Railway":"Cloudflare"}</div><dl class="kv" style="margin:10px 0">${names.map(n=>`<dt>${n}</dt><dd>${fa(d.tables[n].rows.length)} ردیف</dd>`).join("")}</dl>
+  ${field("روش بازیابی",sel("mode",[["replace","جایگزینی کامل (داده‌های فعلی پاک میشن)"],["merge","ادغام (ردیف‌های هم‌شناسه بازنویسی میشن)"]],"replace"))}
+  <div class="warn" style="margin-bottom:10px">قبل از شروع، یک بکاپ ایمنی از وضعیت فعلی دانلود میشه. تا پایان کار این صفحه رو نبند.</div>
+  <div class="bar" id="rbar" hidden><i style="width:0"></i></div><div class="pd" id="rtxt" style="margin:6px 0"></div><button class="btn bad" id="rgo">${ic("up")}شروع بازیابی</button>`;
+  $("#rgo").onclick=async e=>{
+    if(!await confirmBox("بازیابی شروع بشه؟ این کار داده‌های فعلی رو تغییر میده.","شروع بازیابی"))return;
+    await busy(e.currentTarget,async()=>{
+      const mode=$("[name=mode]").value;$("#rtxt").textContent="گرفتن بکاپ ایمنی...";await downloadBackup();
+      $("#rbar").hidden=false;const total=names.reduce((n,k)=>n+Math.max(1,Math.ceil(d.tables[k].rows.length/100)),0);let step=0;
+      for(const n of names){const t=d.tables[n],rows=t.rows;$("#rtxt").textContent=`در حال بازیابی ${n}...`;
+        for(let i=0;i===0||i<rows.length;i+=100){await api("/api/restore",{method:"POST",body:{table:n,columns:t.columns,rows:rows.slice(i,i+100),first:i===0,mode}});step++;$("i",$("#rbar")).style.width=step/total*100+"%"}}
+      await api("/api/restore/finish",{method:"POST"});$("#rtxt").textContent="";toast("بازیابی کامل شد ✅");route()});
+  };
+}
+
+/* ============ سیستم و استقرار ============ */
+PAGES.system=async v=>{
+  const s=await api("/api/system"),w=s.webhook,e=s.env;
+  const ck=(ok,label,hint="")=>`<div class="sr"><div>${label}${hint?`<small>${hint}</small>`:""}</div>${ok?chip("تنظیم شده","ok"):chip("ندارد","er")}</div>`;
+  v.innerHTML=head("سیستم و استقرار","وضعیت ربات، وبهوک و راهنمای استقرار روی Cloudflare و Railway")+`
+  <div class="grid g2"><div class="card"><h3>${ic("send")}ربات و وبهوک</h3><dl class="kv"><dt>ربات</dt><dd>${s.bot?"@"+esc(s.bot.username):"توکن نامعتبر؟"}</dd><dt>اجرا روی</dt><dd>${s.runtime==="railway"?"Railway":"Cloudflare Workers"}</dd><dt>آدرس عمومی</dt><dd class="mono" style="font-size:12px">${esc(s.origin||"—")}</dd><dt>نسخه پنل</dt><dd>${esc(s.version)}</dd></dl>
+    <div style="margin:12px 0">${w?(w.url_set?(w.matches?chip("وبهوک درسته","ok"):chip("وبهوک روی آدرس دیگه‌ایه","wa")):chip("وبهوک تنظیم نیست","er")):chip("وضعیت نامشخص","er")} ${w&&w.pending?chip(fa(w.pending)+" آپدیت در صف","wa"):""}</div>${w?.last_error?`<div class="warn" style="margin-bottom:10px">آخرین خطای تلگرام (${ago(w.last_error_at)}): <span class="mono">${esc(w.last_error)}</span></div>`:""}
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" data-a="whset">${ic("plug")}تنظیم وبهوک روی این آدرس</button><button class="btn bad" data-a="whdel">حذف وبهوک</button></div></div>
+  <div class="card"><h3>${ic("shield")}متغیرهای محیطی</h3>${ck(e.BOT_TOKEN,"BOT_TOKEN")}${ck(e.ADMIN_IDS,"ADMIN_IDS",e.ADMIN_IDS?fa(e.ADMIN_IDS)+" ادمین":"")}${ck(e.WEBHOOK_SECRET,"WEBHOOK_SECRET")}${ck(e.PANEL_PASSWORD,"PANEL_PASSWORD","ورود با رمز (اختیاری)")}${ck(e.KV,"KV","کش مشترک تنظیمات (اختیاری)")}${s.runtime==="cloudflare"?ck(e.CF_API_TOKEN&&e.CF_ACCOUNT_ID,"CF_API_TOKEN + CF_ACCOUNT_ID","آمار مصرف کلادفلر (اختیاری)"):""}</div></div>
+  <div class="grid g2" style="margin-top:16px"><div class="card"><h3>${ic("cloud")}استقرار روی Cloudflare</h3><ol class="steps"><li>D1 بساز و <span class="mono">database_id</span> رو در <span class="mono">wrangler.toml</span> بذار.</li><li>(اختیاری) KV بساز و id رو در بخش <span class="mono">[[kv_namespaces]]</span> بذار.</li><li><div class="code">wrangler d1 execute config-sales-bot-db --remote --file=./schema.sql\nwrangler secret put BOT_TOKEN\nwrangler secret put ADMIN_IDS\nwrangler secret put WEBHOOK_SECRET\nwrangler secret put PANEL_PASSWORD\nwrangler deploy</div></li><li>آدرس Worker رو باز کن و «تنظیم وبهوک» رو بزن.</li></ol></div>
+  <div class="card"><h3>${ic("server")}استقرار روی Railway</h3><ol class="steps"><li>ریپو رو به GitHub بفرست و در Railway «Deploy from GitHub» بزن.</li><li>یک <b>Volume</b> با مسیر <span class="mono">/data</span> وصل کن (ذخیره‌ی دیتابیس).</li><li>متغیرها: <span class="mono">BOT_TOKEN</span>، <span class="mono">ADMIN_IDS</span>، <span class="mono">WEBHOOK_SECRET</span>، <span class="mono">PANEL_PASSWORD</span>.</li><li>در Settings ← Networking یک دامنه‌ی عمومی بساز. وبهوک خودش تنظیم میشه.</li></ol><div class="note" style="margin-top:12px">برای انتقال بین دو پلتفرم: از «بکاپ و بازیابی» بکاپ بگیر و روی مقصد بازیابی کن.</div></div></div>`;
+};
+A.whset=el=>busy(el,async()=>{await api("/api/system/webhook",{method:"POST",body:{action:"set"}});toast("وبهوک تنظیم شد");route()});
+A.whdel=async el=>{if(await confirmBox("وبهوک حذف بشه؟ ربات تا تنظیم دوباره جواب نمیده."))busy(el,async()=>{await api("/api/system/webhook",{method:"POST",body:{action:"delete"}});toast("حذف شد");route()})};
+
+/* ============ تنظیمات ربات ============ */
+const ST={tab:"general",data:null};
+const COLORS=[["primary","آبی"],["success","سبز"],["danger","قرمز"],["none","بدون رنگ"]];
+PAGES.settings=async v=>{
+  ST.data=await api("/api/settings");
+  v.innerHTML=head("تنظیمات ربات","متن‌ها، دکمه‌ها، قوانین، گردونه، کانال‌ها و گروه گزارش")+`<div class="tabs">${[["general","عمومی"],["buttons","دکمه‌ها"],["rules","قوانین"],["wheel","گردونه"],["channels","کانال اجباری"],["log","گروه گزارش"]].map(([k,l])=>`<span class="tab ${ST.tab===k?"on":""}" data-a="stab" data-k="${k}" tabindex="0">${l}</span>`).join("")}</div><div id="sb"></div>`;
+  drawSettings();
+};
+A.stab=el=>{ST.tab=el.dataset.k;$$(".tab").forEach(t=>t.classList.toggle("on",t===el));drawSettings()};
+const saveBtn=(f)=>`<button class="btn pri" data-a="ssave" style="margin-top:6px">${ic("check")}ذخیره</button>`;
+let SAVE=null;A.ssave=el=>busy(el,async()=>{await SAVE();toast("ذخیره شد");ST.data=await api("/api/settings");drawSettings()});
+function drawSettings(){
+  const el=$("#sb"),d=ST.data,s=d.simple;
+  if(ST.tab==="general"){
+    el.innerHTML=`<div class="card"><div class="row2">${field("نام ربات (در پیام خوش‌آمد)",inp("bot_display_name",s.bot_display_name))}${field("درصد کمیسیون زیرمجموعه‌گیری",inp("referral_percent",s.referral_percent,{num:1}))}</div><div class="row2">${field("شماره کارت",inp("card_number",s.card_number,{dir:"ltr"}))}${field("نام صاحب کارت",inp("card_holder",s.card_holder))}</div>${field("متن پشتیبانی",`<textarea name="support_text">${esc(s.support_text)}</textarea>`,"HTML تلگرام مجازه")}${field("متن آموزش اتصال",`<textarea name="tutorial_text" style="min-height:140px">${esc(s.tutorial_text)}</textarea>`)}
+    <div class="sr"><div>ارسال QR کد همراه لینک اشتراک<small>داخل خود Worker ساخته میشه</small></div>${sw("qr_enabled",d.ui.qr_enabled)}</div><div class="sr"><div>تایید مالکیت در استعلام اشتراک قبلی<small>خاموش کردنش ناامنه</small></div>${sw("ext_verify",d.ui.ext_verify)}</div>${saveBtn()}</div>`;
+    SAVE=()=>{const f=formData(el);return api("/api/settings",{method:"POST",body:{simple:{bot_display_name:f.bot_display_name,referral_percent:nd(f.referral_percent),card_number:nd(f.card_number),card_holder:f.card_holder,support_text:f.support_text,tutorial_text:f.tutorial_text},ui:{qr_enabled:f.qr_enabled,ext_verify:f.ext_verify}}})};
+  }else if(ST.tab==="buttons"){
+    const menu=d.ui.menu,roles=d.ui.roles;
+    el.innerHTML=`<div class="note" style="margin-bottom:14px">تغییر متن/رنگ برای هر کاربر از /start بعدی اعمال میشه. رنگ دکمه‌ها فقط روی نسخه‌ی جدید تلگرام دیده میشه. دکمه‌ی خاموش از منو برداشته میشه و کار نمی‌کنه.</div><div class="list">${d.defaults.menu.map(m=>{const c=menu[m.key]||{};return `<div class="it" data-k="${m.key}"><div style="flex:1;min-width:200px"><input type="text" name="label" value="${esc(c.label||m.label)}" aria-label="متن دکمه"></div><div style="width:130px">${sel("style",COLORS,c.style||m.style)}</div><label style="display:flex;gap:8px;align-items:center">${m.key==="admin"?'<span class="m">همیشه روشن</span>':`<span class="m">نمایش</span>${sw("show",!c.hidden)}`}</label></div>`}).join("")}</div>
+    <div class="card" style="margin-top:16px"><h3>${ic("sliders")}رنگ دسته‌های دکمه‌های شیشه‌ای</h3><div class="row3">${[["primary","معمولی"],["success","تایید/پرداخت"],["danger","حذف/رد"]].map(([r,l])=>field(l,sel("role_"+r,COLORS,roles[r]||r))).join("")}</div></div>${saveBtn()}`;
+    SAVE=()=>{const menu={};$$("[data-k]",el).forEach(row=>{const k=row.dataset.k;menu[k]={label:$("[name=label]",row).value,style:$("[name=style]",row).value,hidden:k==="admin"?false:!$("[name=show]",row).checked}});const f=formData(el),roles={};for(const r of["primary","success","danger"])roles[r]=f["role_"+r];return api("/api/settings",{method:"POST",body:{ui:{menu,roles}}})};
+  }else if(ST.tab==="rules"){
+    const u=d.ui;
+    el.innerHTML=`<div class="card"><div class="sr" style="padding-top:0"><div>نمایش قوانین قبل از استفاده<small>هر کاربر یک‌بار با دکمه‌ی سبز می‌پذیره</small></div>${sw("rules_enabled",u.rules_enabled)}</div>${field("متن قوانین",`<textarea name="rules_text" style="min-height:220px">${esc(u.rules_text||d.defaults.rules_text)}</textarea>`,"HTML مجاز: b, i, u, s, code, pre, a, blockquote")}${field("متن دکمه‌ی پذیرش",inp("rules_btn",u.rules_btn||d.defaults.rules_btn))}<div style="display:flex;gap:8px;flex-wrap:wrap">${saveBtn().replace("margin-top:6px","")}<button class="btn" data-a="rprev">${ic("send")}پیش‌نمایش در تلگرام من</button></div></div>`;
+    SAVE=()=>{const f=formData(el);return api("/api/settings",{method:"POST",body:{ui:{rules_enabled:f.rules_enabled,rules_text:f.rules_text,rules_btn:f.rules_btn}}})};
+  }else if(ST.tab==="wheel"){
+    ST.wheel=d.wheel.map(x=>({...x}));drawWheel();
+  }else if(ST.tab==="channels"){
+    el.innerHTML=`<div class="card"><p class="pd" style="margin-bottom:12px">کاربر باید عضو این کانال‌ها/گروه‌ها باشه تا ربات کار کنه. ربات باید داخلشون ادمین باشه.</p>${d.channels.length?`<div class="list" style="margin-bottom:14px">${d.channels.map(c=>`<div class="it"><div class="main-c"><div class="t">${esc(c.title||c.ref)}</div><div class="m mono">${esc(c.ref)}</div></div><button class="btn sm bad" data-a="chdel" data-ref="${esc(c.ref)}">${ic("trash")}</button></div>`).join("")}</div>`:'<div class="m" style="margin-bottom:14px">کانالی ثبت نشده.</div>'}<div class="row3" id="chf">${field("آیدی",inp("ref","",{dir:"ltr",ph:"@mychannel"}))}${field("عنوان",inp("title","",{ph:"کانال اصلی"}))}<div style="align-self:end;margin-bottom:12px"><button class="btn pri" data-a="chadd">${ic("plus")}افزودن</button></div></div></div>`;
+  }else{
+    const L=d.log;
+    el.innerHTML=`<div class="card"><p class="pd" style="margin-bottom:12px">گزارش فروش و خطاها داخل یک گروه تاپیک‌دار (Forum). ربات رو ادمین گروه کن (با دسترسی Manage Topics) و آیدی گروه رو اینجا بذار، یا داخل گروه <span class="mono">/setlog</span> بفرست.</p>${field("آیدی گروه",inp("chat_id",L.chat_id||"",{dir:"ltr",ph:"-1001234567890"}))}${L.topics.map(t=>`<div class="sr"><span>${esc(t.label)}</span>${sw("t_"+t.key,!L.off.includes(t.key))}</div>`).join("")}<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">${saveBtn().replace("margin-top:6px","")}<button class="btn" data-a="logtest">${ic("send")}ارسال پیام تست</button><button class="btn bad" data-a="logoff">قطع گروه</button></div></div>`;
+    SAVE=()=>{const f=formData(el);return api("/api/settings",{method:"POST",body:{log:{chat_id:f.chat_id?nd(f.chat_id):null,off:L.topics.filter(t=>!f["t_"+t.key]).map(t=>t.key)}}})};
+  }
+}
+function drawWheel(){
+  const el=$("#sb"),W=ST.wheel,tw=W.reduce((n,x)=>n+Math.max(0,Number(x.weight)||0),0)||1;
+  el.innerHTML=`<div class="card"><p class="pd" style="margin-bottom:12px">هر کاربر هر چند وقت یک بار می‌چرخونه. احتمال هر جایزه = وزنش تقسیم بر مجموع وزن‌ها.</p><div class="list">${W.map((x,i)=>`<div class="it" data-i="${i}"><div style="flex:1;min-width:150px"><input type="text" name="label" value="${esc(x.label)}" aria-label="عنوان"></div><div style="width:130px"><input type="text" inputmode="numeric" name="amount" value="${x.amount}" aria-label="مبلغ (تومان)" placeholder="مبلغ"></div><div style="width:90px"><input type="text" inputmode="numeric" name="weight" value="${x.weight}" aria-label="وزن" placeholder="وزن"></div><span class="chip vi num" style="min-width:56px;justify-content:center">${fa(Math.round((Number(x.weight)||0)/tw*1000)/10)}٪</span><button class="btn sm bad" data-a="wdel" data-i="${i}">${ic("trash")}</button></div>`).join("")}</div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn" data-a="wadd">${ic("plus")}جایزه جدید</button><button class="btn pri" data-a="ssave">${ic("check")}ذخیره</button></div></div>`;
+  $$("[data-i] input",el).forEach(i=>i.oninput=()=>{const r=i.closest("[data-i]");const x=ST.wheel[+r.dataset.i];x[i.name]=i.name==="label"?i.value:Number(nd(i.value))||0;if(i.name==="weight"){const t=ST.wheel.reduce((n,y)=>n+Math.max(0,y.weight||0),0)||1;$$("[data-i]",el).forEach((rr,k)=>{$(".chip",rr).textContent=fa(Math.round((ST.wheel[k].weight||0)/t*1000)/10)+"٪"})}});
+  SAVE=()=>api("/api/settings",{method:"POST",body:{wheel:ST.wheel}});
+}
+A.wadd=()=>{ST.wheel.push({label:"🎁 جایزه",amount:0,weight:10});drawWheel()};
+A.wdel=el=>{ST.wheel.splice(+el.dataset.i,1);drawWheel()};
+A.rprev=el=>busy(el,async()=>{const f=formData($("#sb"));await api("/api/settings",{method:"POST",body:{rules_preview:true,rules_preview_text:f.rules_text}});toast("برای تلگرام شما ارسال شد")});
+A.chadd=el=>busy(el,async()=>{const f=formData($("#chf"));await api("/api/channels",{method:"POST",body:{ref:f.ref,title:f.title}});toast("اضافه شد");ST.data=await api("/api/settings");drawSettings()});
+A.chdel=el=>busy(el,async()=>{await api("/api/channels?ref="+encodeURIComponent(el.dataset.ref),{method:"DELETE"});ST.data=await api("/api/settings");drawSettings()});
+A.logtest=el=>busy(el,async()=>{await api("/api/settings",{method:"POST",body:{log:{test:true}}});toast("پیام تست ارسال شد")});
+A.logoff=async el=>{if(await confirmBox("اتصال گروه گزارش قطع بشه؟"))busy(el,async()=>{await api("/api/settings",{method:"POST",body:{log:{chat_id:null}}});toast("قطع شد");ST.data=await api("/api/settings");drawSettings()})};
+
+/* ============ شروع ============ */
+async function boot(){
+  const r=await fetch("/api/me",{credentials:"same-origin"});const j=await r.json().catch(()=>({}));
+  if(r.status===401){ME=j;return showLogin()}
+  ME=j;shell();if(!location.hash)location.hash="#/dashboard";route();
+}
+window.addEventListener("hashchange",()=>ME&&route());
+boot();
+</script>
+</body>
+</html>

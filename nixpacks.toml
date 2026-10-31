@@ -1,0 +1,11 @@
+[phases.setup]
+nixPkgs = ["nodejs_22"]
+
+[phases.install]
+cmds = ["echo no dependencies"]
+
+[phases.build]
+cmds = ["echo ok"]
+
+[start]
+cmd = "node railway/server.js"
