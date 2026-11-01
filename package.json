@@ -1,13 +1,16 @@
 {
-  "name": "vpnbot-panel",
-  "version": "5.0.0",
+  "name": "vpnbot",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "ربات فروش کانفیگ VPN — Cloudflare Workers + Railway، با پنل وب",
-  "engines": { "node": ">=22.13" },
+  "description": "ربات فروش کانفیگ تلگرام — Cloudflare Workers یا Railway",
+  "main": "server.js",
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
-    "start": "node railway/server.js",
-    "build:ui": "node scripts/build-ui.mjs",
-    "deploy:cf": "wrangler deploy"
+    "start": "node --no-warnings server.js",
+    "import": "node --no-warnings scripts/import-sql.js",
+    "build:ui": "node scripts/build-ui.mjs"
   }
 }

@@ -9,18 +9,19 @@ binding = "DB"
 database_name = "config-sales-bot-db"
 database_id = "REPLACE_WITH_D1_DATABASE_ID"
 
-# ---------- اختیاری: KV (کش مشترک تنظیمات) ----------
+# ---------- اختیاری: KV (کش مشترک تنظیمات؛ بدونش فقط کش حافظه استفاده میشه) ----------
 # 1) wrangler kv namespace create CACHE   ← id رو از خروجی بردار
-# 2) خط‌های زیر رو از حالت کامنت دربیار و id رو جایگزین کن
+# 2) خط‌های زیر رو از حالت کامنت دربیار و id رو جایگزین کن، بعد دوباره wrangler deploy
 # [[kv_namespaces]]
 # binding = "KV"
 # id = "REPLACE_WITH_KV_NAMESPACE_ID"
 
-# ---------- Cron: بکاپ خودکار روی تلگرام (از پنل روشن/خاموش میشه) ----------
+# هر دقیقه: ادامه‌ی پیام همگانی (فقط اگه کاری در جریان باشه)
+# بکاپ شبانه به تاپیک «💾 بکاپ» گروه گزارش: ۲۰:۳۰ UTC = ۰۰:۰۰ به وقت تهران
 [triggers]
-crons = ["0 */6 * * *"]
+crons = ["* * * * *", "30 20 * * *"]
 
-# ---------- اختیاری: برای نمایش آمار مصرف در پنل ----------
+# ---------- اختیاری: آمار مصرف داخل پنل وب ----------
 # فقط شناسه‌ها (محرمانه نیستن). توکن و Account ID رو با wrangler secret بذار:
 #   wrangler secret put CF_API_TOKEN     (دسترسی Account Analytics: Read)
 #   wrangler secret put CF_ACCOUNT_ID

@@ -9,12 +9,15 @@ import { cfUsage, cfConfigured } from "./cfstats.js";
 
 const enc = new TextEncoder();
 const SESSION_DAYS = 7;
-const TABLES = ["users", "products", "categories", "configs", "orders", "referrals", "channels", "exit_logs", "panels", "ext_services", "settings"];
+const TABLES = ["users", "products", "categories", "configs", "orders", "referrals", "channels", "exit_logs", "panels", "ext_services", "settings", "state"];
+// جدول state موقتیه؛ فقط اسم‌های دلخواه سرویس‌ها (svcname:*) بکاپ/بازیابی میشن
+const tFilter = (t) => (t === "state" ? "WHERE key LIKE 'svcname:%'" : "");
 const VERSION = "5.0.0";
 
 let ORIGIN = "";
 export function setOrigin(env, o) {
-  ORIGIN = (env.PUBLIC_URL || o || ORIGIN || "").replace(/\/+$/, "");
+  const real = o && !/^https?:\/\/(internal|localhost:0)(\/|$)/.test(o) ? o : "";
+  ORIGIN = (env.PUBLIC_URL || real || ORIGIN || "").replace(/\/+$/, "");
 }
 
 // ---------- ابزارهای پایه ----------
@@ -442,7 +445,7 @@ R("POST", "/api/vpnpanels", async ({ env, body, I }) => {
   const name = str(b.name, 80).trim(), base_url = str(b.base_url, 300).trim().replace(/\/+$/, "");
   if (!name) return err("نام پنل الزامیه");
   if (!/^https?:\/\//i.test(base_url)) return err("آدرس پنل باید با http:// یا https:// شروع بشه");
-  if (I.isIpHost(base_url) && env.RUNTIME !== "node") return err("آدرس IP خام روی Cloudflare Workers کار نمیکنه (خطای 1003)؛ از دامنه با SSL استفاده کن.");
+  if (I.isIpHost(base_url)) return err("آدرس پنل IP خامه. Cloudflare Workers اجازه اتصال مستقیم به IP نمیده (خطای 1003)؛ باید یه دامنه (با SSL) برای پنل بدی (Cloudflare Tunnel یا Nginx/Caddy روی 443).");
   const x = b.extra || {};
   const extra = {};
   const sub = str(x.sub_base, 300).trim().replace(/\/+$/, "");
@@ -507,14 +510,15 @@ R("GET", "/api/settings", async ({ env, I }) => {
     simple: {
       card_number: await g("card_number"), card_holder: await g("card_holder"), support_text: await g("support_text"),
       tutorial_text: await g("tutorial_text"), bot_display_name: await g("bot_display_name", "ربات فروش کانفیگ"),
-      referral_percent: await g("referral_percent", "10"), auto_backup: await g("auto_backup", "0"), backup_every_h: await g("backup_every_h", "24"),
+      referral_percent: await g("referral_percent", "10"),
     },
     wheel,
     ui: {
       menu: ui.menu, roles: ui.roles, rules_enabled: ui.rules_enabled !== false, rules_text: ui.rules_text || "", rules_btn: ui.rules_btn || "",
       qr_enabled: ui.qr_enabled !== false, ext_verify: ui.ext_verify !== false,
+      welcome_text: ui.welcome_text || "", welcome_back_text: ui.welcome_back_text || "",
     },
-    defaults: { rules_text: I.DEFAULT_RULES_TEXT, rules_btn: I.DEFAULT_RULES_BTN, menu: I.MENU_ITEMS },
+    defaults: { rules_text: I.DEFAULT_RULES_TEXT, rules_btn: I.DEFAULT_RULES_BTN, welcome_text: I.DEFAULT_WELCOME_TEXT, welcome_back_text: I.DEFAULT_WELCOME_BACK_TEXT, menu: I.MENU_ITEMS },
     log: { chat_id: log.chat_id, off: log.off, topics: Object.entries(I.LOG_TOPICS).map(([k, v]) => ({ key: k, label: v.label })) },
     channels,
   });
@@ -530,8 +534,6 @@ R("POST", "/api/settings", async ({ env, body, I, session }) => {
       if (n < 0 || n > 100) return err("درصد کمیسیون باید بین ۰ تا ۱۰۰ باشه");
       await I.setSetting(env, "referral_percent", String(n));
     }
-    if ("auto_backup" in b.simple) await I.setSetting(env, "auto_backup", b.simple.auto_backup === "1" || b.simple.auto_backup === true ? "1" : "0");
-    if ("backup_every_h" in b.simple) await I.setSetting(env, "backup_every_h", String([6, 12, 24, 72, 168].includes(int(b.simple.backup_every_h)) ? int(b.simple.backup_every_h) : 24));
   }
   if (Array.isArray(b.wheel)) {
     const w = b.wheel.map((x) => ({ label: str(x.label, 60).trim(), amount: Math.max(0, Math.round(num(x.amount))), weight: Math.max(0, num(x.weight)) })).filter((x) => x.label);
@@ -565,6 +567,15 @@ R("POST", "/api/settings", async ({ env, body, I, session }) => {
         if (!TG_HTML_OK.test(t)) return err("متن قوانین HTML نامعتبر داره (فقط b, i, u, s, code, pre, a, blockquote مجازه).");
         cfg.rules_text = t;
       } else delete cfg.rules_text;
+    }
+    for (const [k, def] of [["welcome_text", I.DEFAULT_WELCOME_TEXT], ["welcome_back_text", I.DEFAULT_WELCOME_BACK_TEXT]]) {
+      if (k in u) {
+        const t = str(u[k], 1500).trim();
+        if (t && t !== def) {
+          if (!TG_HTML_OK.test(t)) return err("متن خوش‌آمد HTML نامعتبر داره.");
+          cfg[k] = t;
+        } else delete cfg[k];
+      }
     }
     await I.saveUiCfg(env, cfg);
   }
@@ -600,25 +611,34 @@ R("DELETE", "/api/channels", async ({ env, url }) => {
   return json({ ok: true });
 });
 
-// ---------- پیام همگانی (تکه‌تکه از مرورگر؛ سازگار با سقف تماس‌های پلن رایگان) ----------
+// ---------- پیام همگانی (موتور خود ربات: کار پایدار، قابل ادامه بعد از ری‌استارت، با رعایت سرعت تلگرام) ----------
+const jobView = (raw) => {
+  const j = safeJson(raw, null);
+  return j ? { total: j.total, sent: j.sent, failed: j.failed, blocked: j.blocked, started: j.started, text: String(j.text || "").slice(0, 200) } : null;
+};
+R("GET", "/api/broadcast", async ({ env, I }) => json({ ok: true, job: jobView(await I.stateGet(env, "bc:job")), serverLoop: typeof env.kickBroadcast === "function" }));
 R("POST", "/api/broadcast", async ({ env, body, I, session }) => {
   const b = await body();
   const text = str(b.text, 3800).trim();
   if (!text) return err("متن خالیه");
+  const me = session.u || int(adminList(env)[0]);
   if (b.test) {
-    const to = session.u || adminList(env)[0];
-    const r = await I.sendMessage(env, to, text);
-    return r.ok ? json({ ok: true }) : err(r.description || "ارسال نشد");
+    const r = await I.sendMessage(env, me, text);
+    return r.ok ? json({ ok: true }) : err(r.description || "ارسال نشد (متن نامعتبر؟)");
   }
-  const offset = Math.max(0, int(b.offset)), limit = Math.min(40, Math.max(1, int(b.limit, 30)));
-  const total = offset === 0 ? (await env.DB.prepare("SELECT COUNT(*) n FROM users WHERE registered=1 AND is_banned=0").first()).n : undefined;
-  const { results } = await env.DB.prepare("SELECT id FROM users WHERE registered=1 AND is_banned=0 ORDER BY id LIMIT ? OFFSET ?").bind(limit, offset).all();
-  let sent = 0, failed = 0;
-  for (const u of results) {
-    try { const r = await I.sendMessage(env, u.id, text, I.mainMenuKeyboard(I.isAdmin(env, u.id))); r.ok ? sent++ : failed++; } catch { failed++; }
-  }
-  return json({ ok: true, sent, failed, next: offset + results.length, done: results.length < limit, total });
+  const r = await I.startBroadcast(env, me, me, text);
+  if (r.error) return err(r.error);
+  if (typeof env.kickBroadcast === "function") env.kickBroadcast(); // Railway: کار پس‌زمینه تا آخر
+  else await I.runBroadcastTick(env, { maxSends: 40 }); // Cloudflare: ۴۰ تا همین الان، بقیه با «tick»های پنل/Cron
+  return json({ ok: true, total: r.total, job: jobView(await I.stateGet(env, "bc:job")) });
 });
+// Cloudflare: پنل بعد از شروع، مدام این رو صدا می‌زنه تا کار سریع‌تر از Cron هر‌دقیقه جلو بره
+R("POST", "/api/broadcast/tick", async ({ env, I }) => {
+  if (typeof env.kickBroadcast === "function") env.kickBroadcast();
+  else await I.runBroadcastTick(env, { maxSends: 40 });
+  return json({ ok: true, job: jobView(await I.stateGet(env, "bc:job")) });
+});
+R("POST", "/api/broadcast/stop", async ({ env, I }) => json({ ok: true, stopped: await I.stopBroadcast(env) }));
 
 // ---------- مصرف و سلامت ----------
 R("GET", "/api/usage", async ({ env, url }) => {
@@ -626,8 +646,9 @@ R("GET", "/api/usage", async ({ env, url }) => {
   const lite = url.searchParams.get("lite") === "1"; // نسخه‌ی سبک برای هدر (بدون شمارش جدول‌ها و بدون API کلادفلر)
   const out = { ok: true, runtime: env.RUNTIME === "node" ? "railway" : "cloudflare", optimizer: { ...optStats }, kvBound: !!env.KV };
   if (lite) return json(out);
-  const tableCounts = await env.DB.batch(TABLES.map((t) => env.DB.prepare(`SELECT COUNT(*) n FROM ${t}`)));
-  out.tables = Object.fromEntries(TABLES.map((t, i) => [t, tableCounts[i].results[0].n]));
+  const UT = TABLES.filter((t) => t !== "state");
+  const tableCounts = await env.DB.batch(UT.map((t) => env.DB.prepare(`SELECT COUNT(*) n FROM ${t}`)));
+  out.tables = Object.fromEntries(UT.map((t, i) => [t, tableCounts[i].results[0].n]));
   if (env.RUNTIME === "node") {
     out.node = typeof env.RUNTIME_STATS === "function" ? await env.RUNTIME_STATS() : {};
   } else if (cfConfigured(env)) {
@@ -652,15 +673,16 @@ async function liveColumns(env, table) {
 }
 R("GET", "/api/backup/meta", async ({ env, I }) => {
   await I.ensureCatSchema(env);
-  const counts = await env.DB.batch(TABLES.map((t) => env.DB.prepare(`SELECT COUNT(*) n FROM ${t}`)));
-  return json({ ok: true, tables: TABLES.map((t, i) => ({ name: t, rows: counts[i].results[0].n })), version: VERSION, runtime: env.RUNTIME === "node" ? "railway" : "cloudflare" });
+  const counts = await env.DB.batch(TABLES.map((t) => env.DB.prepare(`SELECT COUNT(*) n FROM ${t} ${tFilter(t)}`)));
+  const nightly = int(await I.stateGet(env, "backup_last").then((v) => (v ? Date.parse(v) : 0)).catch(() => 0));
+  return json({ ok: true, nightly: nightly || null, tables: TABLES.map((t, i) => ({ name: t, rows: counts[i].results[0].n })), version: VERSION, runtime: env.RUNTIME === "node" ? "railway" : "cloudflare" });
 });
 R("GET", "/api/backup/table", async ({ env, url }) => {
   const name = url.searchParams.get("name");
   if (!TABLES.includes(name)) return err("جدول نامعتبره");
   const offset = Math.max(0, int(url.searchParams.get("offset"))), limit = Math.min(1000, Math.max(1, int(url.searchParams.get("limit"), 500)));
   const columns = await liveColumns(env, name);
-  const { results } = await env.DB.prepare(`SELECT * FROM ${name} ORDER BY ${name === "settings" || name === "channels" ? "rowid" : "id"} LIMIT ? OFFSET ?`).bind(limit, offset).all();
+  const { results } = await env.DB.prepare(`SELECT * FROM ${name} ${tFilter(name)} ORDER BY rowid LIMIT ? OFFSET ?`).bind(limit, offset).all();
   return json({ ok: true, columns, rows: results.map((r) => columns.map((c) => r[c] ?? null)), done: results.length < limit });
 });
 R("POST", "/api/restore", async ({ env, body, I }) => {
@@ -672,64 +694,57 @@ R("POST", "/api/restore", async ({ env, body, I }) => {
   const cols = (Array.isArray(b.columns) ? b.columns : []).map((c, i) => [c, i]).filter(([c]) => live.includes(c));
   if (!cols.length) return err("ستون‌های جدول با دیتابیس نمیخونه");
   const stmts = [];
-  if (b.first && b.mode !== "merge") stmts.push(env.DB.prepare(`DELETE FROM ${t}`));
+  if (b.first && b.mode !== "merge") stmts.push(env.DB.prepare(`DELETE FROM ${t} ${tFilter(t)}`));
   const rows = (Array.isArray(b.rows) ? b.rows : []).slice(0, 100);
   const sql = `INSERT OR REPLACE INTO ${t} (${cols.map(([c]) => c).join(",")}) VALUES (${cols.map(() => "?").join(",")})`;
   for (const r of rows) stmts.push(env.DB.prepare(sql).bind(...cols.map(([, i]) => (r[i] === undefined ? null : r[i]))));
   if (stmts.length) await env.DB.batch(stmts);
   return json({ ok: true, inserted: rows.length });
 });
-R("POST", "/api/restore/finish", async ({ env, I }) => {
+const whoTagEarly = (...a) => whoTag(...a);
+R("POST", "/api/restore/finish", async ({ env, body, I, session }) => {
+  const b = await body();
   await invalidateSettings(env);
   I.clearPanelCache();
+  await I.logEvent(env, "backup", `♻️ <b>بازیابی بکاپ انجام شد</b>\n👤 ${await whoTagEarly(I, env, session)}\n🔁 حالت: ${b.mode === "merge" ? "ادغام" : "جایگزینی کامل"}\n📦 ${int(b.tables).toLocaleString("fa-IR")} جدول · ${int(b.rows).toLocaleString("fa-IR")} ردیف`);
   return json({ ok: true });
 });
 
-export async function buildBackup(env) {
-  const out = { format: "vpnbot-backup", version: 1, panel_version: VERSION, created_at: Date.now(), runtime: env.RUNTIME === "node" ? "railway" : "cloudflare", tables: {} };
-  for (const t of TABLES) {
-    const columns = await liveColumns(env, t);
-    const rows = [];
-    for (let off = 0; ; off += 1000) {
-      const { results } = await env.DB.prepare(`SELECT * FROM ${t} ORDER BY ${t === "settings" || t === "channels" ? "rowid" : "id"} LIMIT 1000 OFFSET ?`).bind(off).all();
-      for (const r of results) rows.push(columns.map((c) => r[c] ?? null));
-      if (results.length < 1000) break;
-    }
-    out.tables[t] = { columns, rows };
+// بکاپ SQL فشرده (همون فرمت بکاپ شبانه‌ی ربات؛ با wrangler d1 execute یا import-sql هم قابل بازیابیه)
+R("GET", "/api/backup/sql", async ({ env, I }) => {
+  const { sql } = await I.dumpDatabaseSql(env);
+  const gz = await I.gzipText(sql);
+  const name = `backup-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.sql.gz`;
+  return new Response(gz, { headers: { "Content-Type": "application/gzip", "Content-Disposition": `attachment; filename="${name}"`, "Cache-Control": "no-store" } });
+});
+// ارسال بکاپ همین الان به تاپیک «💾 بکاپ» گروه گزارش (یا پیوی ادمین‌ها اگه گروه وصل نیست)
+R("POST", "/api/backup/telegram", async ({ env, I }) => {
+  const r = await I.sendBackupToLog(env, { auto: false });
+  return r.ok ? json({ ok: true }) : err(r.error || "ارسال نشد");
+});
+// بازیابی دامپ SQL (.sql / .sql.gz) — فقط روی Railway/Node
+R("POST", "/api/restore/sql", async ({ env, request, I, session }) => {
+  if (typeof env.RESTORE_SQL !== "function") return err("بازیابی فایل SQL از پنل فقط روی Railway ممکنه. روی Cloudflare از «بازیابی بکاپ JSON» یا دستور wrangler d1 execute استفاده کن.");
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (!bytes.length) return err("فایل خالیه");
+  const result = await env.RESTORE_SQL(bytes);
+  await invalidateSettings(env);
+  I.clearPanelCache();
+  await I.logEvent(env, "backup", `♻️ <b>بازیابی بکاپ SQL از پنل وب</b>\n👤 ${await whoTag(I, env, session)}\n📦 ${Object.values(result).filter((v) => typeof v === "number").reduce((n, v) => n + v, 0).toLocaleString("fa-IR")} ردیف`);
+  return json({ ok: true, restored: result });
+});
+const whoTag = async (I, env, session) => (session.u ? await I.logUserTag(env, session.u) : "ورود با رمز پنل");
+R("POST", "/api/backup/log", async ({ env, body, I, session }) => {
+  const b = await body();
+  if (b.action === "download") {
+    await I.logEvent(env, "backup", `📥 <b>بکاپ از پنل وب دانلود شد</b> (${b.kind === "sql" ? "SQL" : "JSON"})\n👤 ${await whoTag(I, env, session)}`);
   }
-  return out;
-}
-export async function sendBackupToAdmins(env, I) {
-  const data = JSON.stringify(await buildBackup(env));
-  if (data.length > 45_000_000) throw new Error("حجم بکاپ از سقف ۵۰ مگابایتی تلگرام بیشتره");
-  const name = `vpnbot-backup-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.json`;
-  let ok = 0, last = "";
-  for (const id of adminList(env)) {
-    const form = new FormData();
-    form.append("chat_id", id);
-    form.append("caption", "💾 بکاپ ربات (از پنل وب)\nاز بخش «بکاپ و بازیابی» پنل قابل بازیابیه.");
-    form.append("document", new Blob([data], { type: "application/json" }), name);
-    const r = await (await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendDocument`, { method: "POST", body: form })).json();
-    if (r.ok) ok++; else last = r.description || "";
-  }
-  if (!ok) throw new Error(last || "ارسال نشد (ادمین‌ها اول به ربات /start بزنن)");
-  await I.setSetting(env, "last_backup_at", String(Date.now()));
-  return ok;
-}
-R("POST", "/api/backup/telegram", async ({ env, I }) => json({ ok: true, sent: await sendBackupToAdmins(env, I) }));
+  return json({ ok: true });
+});
 
-export async function runScheduled(env, I) {
-  try {
-    await env.DB.prepare("DELETE FROM state WHERE (key LIKE 'plogin:%' OR key LIKE 'rl:%') AND updated_at < ?").bind(Date.now() - 86400000).run();
-    if ((await I.getSetting(env, "auto_backup", "0")) !== "1") return;
-    const every = int(await I.getSetting(env, "backup_every_h", "24"), 24) * 3600000;
-    const last = int(await I.getSetting(env, "last_backup_at", "0"), 0);
-    if (Date.now() - last < every - 600000) return;
-    await sendBackupToAdmins(env, I);
-  } catch (e) {
-    console.error("scheduled", e);
-    await I.logEvent(env, "errors", `🔥 <b>خطای بکاپ خودکار</b>\n<code>${I.escapeHtml(String(e?.message || e)).slice(0, 400)}</code>`);
-  }
+// پاکسازی توکن‌های ورود و شمارنده‌های تلاش ناموفق (روزی یک‌بار از بکاپ شبانه / تایمر سرور)
+export async function runPanelCleanup(env) {
+  await env.DB.prepare("DELETE FROM state WHERE (key LIKE 'plogin:%' OR key LIKE 'rl:%') AND updated_at < ?").bind(Date.now() - 86400000).run();
 }
 
 // ---------- سیستم / وبهوک ----------
@@ -738,7 +753,7 @@ R("GET", "/api/system", async ({ env, I }) => {
   const expected = env.WEBHOOK_SECRET && ORIGIN ? `${ORIGIN}/webhook/${env.WEBHOOK_SECRET}` : null;
   const cur = wh?.result?.url || "";
   return json({
-    ok: true, version: VERSION, runtime: env.RUNTIME === "node" ? "railway" : "cloudflare", origin: ORIGIN,
+    ok: true, version: VERSION, runtime: env.RUNTIME === "node" ? "railway" : "cloudflare", origin: ORIGIN, mode: env.BOT_MODE || null,
     bot: me?.ok ? { username: me.result.username, name: me.result.first_name } : null,
     webhook: wh?.ok ? { url_set: !!cur, matches: !!expected && cur === expected, pending: wh.result.pending_update_count, last_error: wh.result.last_error_message || null, last_error_at: (wh.result.last_error_date || 0) * 1000 } : null,
     env: {
@@ -750,6 +765,7 @@ R("GET", "/api/system", async ({ env, I }) => {
 });
 R("POST", "/api/system/webhook", async ({ env, body, I }) => {
   const b = await body();
+  if (env.BOT_MODE && env.BOT_MODE !== "webhook" && b.action !== "delete") return err(`ربات در حالت ${env.BOT_MODE} اجرا میشه؛ برای وبهوک باید BOT_MODE رو حذف کنی یا webhook بذاری.`);
   if (b.action === "delete") {
     const r = await I.rawCall(env, "deleteWebhook", { drop_pending_updates: !!b.drop });
     return r.ok ? json({ ok: true }) : err(r.description || "خطا");

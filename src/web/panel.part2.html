@@ -89,12 +89,12 @@ async function refreshHeader(){try{const u=await api("/api/usage?lite=1");const 
 const A={};
 document.addEventListener("click",e=>{const el=e.target.closest("[data-a]");if(!el)return;const f=A[el.dataset.a];if(f){e.preventDefault();f(el,e)}});
 A.nav=()=>document.body.classList.toggle("nav");
-A.go=()=>document.body.classList.remove("nav");
+A.go=el=>{document.body.classList.remove("nav");const h="#/"+el.dataset.k;if(location.hash===h)route();else location.hash=h};
 A.logout=async()=>{await api("/api/logout",{method:"POST"}).catch(()=>{});ME=null;boot()};
 A.quickbackup=el=>busy(el,downloadBackup);
 
 /* ============ داشبورد ============ */
-function smooth(p){let d=`M${p[0][0]},${p[0][1]}`;for(let i=0;i<p.length-1;i++){const a=p[i-1]||p[i],b=p[i],c=p[i+1],e=p[i+2]||c;d+=` C${b[0]+(c[0]-a[0])/6},${b[1]+(c[1]-a[1])/6} ${c[0]-(e[0]-b[0])/6},${c[1]-(e[1]-b[1])/6} ${c[0]},${c[1]}`}return d}
+function smooth(p,lo=0,hi=240){const k=y=>Math.min(hi,Math.max(lo,y));let d=`M${p[0][0]},${p[0][1]}`;for(let i=0;i<p.length-1;i++){const a=p[i-1]||p[i],b=p[i],c=p[i+1],e=p[i+2]||c;d+=` C${b[0]+(c[0]-a[0])/6},${k(b[1]+(c[1]-a[1])/6)} ${c[0]-(e[0]-b[0])/6},${k(c[1]-(e[1]-b[1])/6)} ${c[0]},${c[1]}`}return d}
 function salesChart(series){
   const W=800,H=240,pad=18,B=210,n=series.length;
   const mx=Math.max(1,...series.map(s=>s.sum)),mc=Math.max(1,...series.map(s=>s.count));
@@ -108,8 +108,8 @@ function salesChart(series){
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="نمودار فروش ۱۴ روز اخیر">
   <defs><linearGradient id="gv" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#a855f7" stop-opacity=".5"/><stop offset=".7" stop-color="#8b5cf6" stop-opacity=".12"/><stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/></linearGradient></defs>
   ${[50,100,150].map(y=>`<line x1="0" x2="${W}" y1="${y}" y2="${y}" stroke="#3e3759" stroke-opacity=".45" stroke-dasharray="4 4"/>`).join("")}<line x1="0" x2="${W}" y1="${B}" y2="${B}" stroke="#4d436a" stroke-opacity=".6"/>
-  <path d="${smooth(pc)}" fill="none" stroke="#f59e0b" stroke-width="2.2" stroke-linecap="round" style="filter:drop-shadow(0 0 5px rgba(245,158,11,.55))"/>
-  <path d="${area(smooth(ps))}" fill="url(#gv)"/><path d="${smooth(ps)}" fill="none" stroke="#c084fc" stroke-width="3" stroke-linecap="round" style="filter:drop-shadow(0 0 7px rgba(192,132,252,.7))"/>
+  <path d="${smooth(pc,4,B)}" fill="none" stroke="#f59e0b" stroke-width="2.2" stroke-linecap="round" style="filter:drop-shadow(0 0 5px rgba(245,158,11,.55))"/>
+  <path d="${area(smooth(ps,4,B))}" fill="url(#gv)"/><path d="${smooth(ps,4,B)}" fill="none" stroke="#c084fc" stroke-width="3" stroke-linecap="round" style="filter:drop-shadow(0 0 7px rgba(192,132,252,.7))"/>
   ${peak.sum>0?`<circle cx="${ps[pi][0]}" cy="${ps[pi][1]}" r="5.5" fill="#fbbf24" style="filter:drop-shadow(0 0 9px #f59e0b)"/>`:""}${dots}${lab}</svg>`;
 }
 function ring(pct,label,sub,color){
@@ -205,13 +205,23 @@ A.user=async el=>{
   $("[data-m]",m.root).onclick=ev=>busy(ev.currentTarget,async()=>{const t=$("[name=msg]",m.root).value;await api(`/api/users/${u.id}/message`,{method:"POST",body:{text:t}});$("[name=msg]",m.root).value="";toast("ارسال شد")});
 };
 A.broadcast=async()=>{
-  const m=openModal("پیام همگانی",`${field("متن پیام",`<textarea name="text" style="min-height:140px" placeholder="متن (HTML تلگرام: b, i, a, code ...)"></textarea>`,"به همه‌ی کاربران ثبت‌نام‌شده و غیرمسدود ارسال میشه. ارسال تکه‌تکه انجام میشه تا به سقف‌های Worker نخوره؛ تا پایان کار این پنجره رو نبند.")}<div id="bp" hidden><div class="bar"><i id="bf" style="width:0"></i></div><div class="pd" id="bt" style="margin-top:6px"></div></div>`,
+  const cur=await api("/api/broadcast").catch(()=>({}));
+  const m=openModal("پیام همگانی",`${field("متن پیام",`<textarea name="text" style="min-height:140px" placeholder="متن (HTML تلگرام: b, i, a, code ...)"></textarea>`,"برای همه‌ی کاربران ثبت‌نام‌شده و غیرمسدود ارسال میشه (به‌جز خودت). ارسال پایداره؛ حتی اگه این پنجره رو ببندی یا سرور ری‌استارت بشه ادامه پیدا می‌کنه.")}
+  <div id="bp" hidden><div class="bar"><i id="bf" style="width:0"></i></div><div class="pd" id="bt" style="margin-top:6px"></div></div>`,
   [{t:ic("send")+"ارسال به همه",c:"pri",f:async()=>{
     const text=$("[name=text]",m.root).value.trim();if(!text)throw new Error("متن خالیه");
     if(!await confirmBox("ارسال برای همه‌ی کاربران؟ این کار برگشت‌پذیر نیست.","ارسال","pri"))return;
-    $("#bp",m.root).hidden=false;let off=0,sent=0,failed=0,total=0;
-    for(;;){const r=await api("/api/broadcast",{method:"POST",body:{text,offset:off,limit:30}});if(r.total!==undefined)total=r.total;sent+=r.sent;failed+=r.failed;off=r.next;
-      $("#bf",m.root).style.width=(total?Math.min(100,off/total*100):100)+"%";$("#bt",m.root).textContent=`${fa(off)} از ${fa(total)} — موفق ${fa(sent)}، ناموفق ${fa(failed)}`;if(r.done)break}
-    toast(`ارسال تموم شد: ${fa(sent)} موفق، ${fa(failed)} ناموفق`)}},
-   {t:"تست روی خودم",f:async()=>{await api("/api/broadcast",{method:"POST",body:{text:$("[name=text]",m.root).value,test:true}});toast("برای خودت ارسال شد")}}]);
+    const r=await api("/api/broadcast",{method:"POST",body:{text}});toast("ارسال شروع شد");await watch(r.job)}},
+   {t:"تست روی خودم",f:async()=>{await api("/api/broadcast",{method:"POST",body:{text:$("[name=text]",m.root).value,test:true}});toast("برای خودت ارسال شد")}},
+   {t:"⛔ توقف",c:"bad",f:async()=>{const r=await api("/api/broadcast/stop",{method:"POST"});toast(r.stopped?"متوقف شد":"کار فعالی نیست")}}]);
+  let alive=true;const obs=new MutationObserver(()=>{if(!document.body.contains(m.root)){alive=false;obs.disconnect()}});obs.observe(document.body,{childList:true});
+  const paint=(j,end)=>{$("#bp",m.root).hidden=false;if(!j&&!end)return;const x=j||end,done=x.sent+x.failed+x.blocked;$("#bf",m.root).style.width=(x.total?Math.min(100,done/x.total*100):100)+"%";$("#bt",m.root).textContent=`${fa(done)} از ${fa(x.total)} — موفق ${fa(x.sent)}، بلاک‌کرده ${fa(x.blocked)}، ناموفق ${fa(x.failed)}`};
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+  async function watch(first){
+    let last=first,serverLoop=cur.serverLoop;paint(first);
+    while(alive){await sleep(serverLoop?2500:1200);
+      const r=await api(serverLoop?"/api/broadcast":"/api/broadcast/tick",{method:serverLoop?"GET":"POST"}).catch(()=>null);if(!r)continue;
+      if(r.job){last=r.job;paint(r.job)}else{paint(null,last);toast("ارسال همگانی تموم شد ✅");break}}
+  }
+  if(cur.job)watch(cur.job);
 };

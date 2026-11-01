@@ -106,31 +106,43 @@ A.usagefresh=el=>busy(el,async()=>{await api("/api/usage?fresh=1&lite=1");await 
 A.cacheclear=el=>busy(el,async()=>{await api("/api/cache/clear",{method:"POST"});toast("کش پاک شد");route()});
 
 /* ============ بکاپ و بازیابی ============ */
-const BK_ORDER=["settings","categories","panels","products","configs","users","orders","referrals","channels","exit_logs","ext_services"];
-async function downloadBackup(onp){
+const BK_ORDER=["settings","categories","panels","products","configs","users","orders","referrals","channels","exit_logs","ext_services","state"];
+function saveBlob(blob,name){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;document.body.append(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000)}
+const stamp=()=>new Date().toISOString().slice(0,16).replace(/[:T]/g,"-");
+async function downloadBackup(onp,log=true){
   const meta=await api("/api/backup/meta");const out={format:"vpnbot-backup",version:1,created_at:Date.now(),runtime:meta.runtime,tables:{}};let done=0;const total=meta.tables.reduce((n,t)=>n+t.rows,0)||1;
   for(const t of meta.tables){const rows=[];let cols=[];for(let off=0;;off+=500){const j=await api(`/api/backup/table?name=${t.name}&offset=${off}&limit=500`);cols=j.columns;rows.push(...j.rows);done+=j.rows.length;onp&&onp(done/total,t.name);if(j.done)break}out.tables[t.name]={columns:cols,rows}}
-  const blob=new Blob([JSON.stringify(out)],{type:"application/json"}),a=document.createElement("a");
-  a.href=URL.createObjectURL(blob);a.download=`vpnbot-backup-${new Date().toISOString().slice(0,16).replace(/[:T]/g,"-")}.json`;document.body.append(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000);
+  saveBlob(new Blob([JSON.stringify(out)],{type:"application/json"}),`vpnbot-backup-${stamp()}.json`);
+  if(log)api("/api/backup/log",{method:"POST",body:{action:"download",kind:"json"}}).catch(()=>{});
   toast("بکاپ دانلود شد");return out;
 }
+async function downloadSql(){
+  const r=await fetch("/api/backup/sql",{credentials:"same-origin"});
+  if(!r.ok){let m="خطا در ساخت بکاپ";try{m=(await r.json()).error||m}catch{}throw new Error(m)}
+  saveBlob(await r.blob(),`backup-${stamp()}.sql.gz`);api("/api/backup/log",{method:"POST",body:{action:"download",kind:"sql"}}).catch(()=>{});toast("بکاپ SQL دانلود شد");
+}
 PAGES.backup=async v=>{
-  const [meta,st]=await Promise.all([api("/api/backup/meta"),api("/api/settings")]);const S=st.simple;
-  v.innerHTML=head("بکاپ و بازیابی",`همه‌ی داده‌های ربات (کاربران، سفارش‌ها، محصولات، پنل‌ها و تنظیمات) — ${meta.runtime==="railway"?"SQLite":"D1"}`)+`
-  <div class="grid g2"><div class="card"><h3>${ic("down")}گرفتن بکاپ</h3><p class="pd" style="margin-bottom:12px">فایل JSON کامل. شامل رمز پنل‌های VPN هم هست؛ جای امن نگهش دار.</p><div class="bar" id="bkbar" hidden><i style="width:0"></i></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="btn pri" data-a="bkdl">${ic("down")}دانلود بکاپ</button><button class="btn" data-a="bktg">${ic("send")}ارسال به تلگرام ادمین‌ها</button></div>
-    <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:12px"><div class="sr"><div>بکاپ خودکار روی تلگرام<small>فایل برای ادمین‌ها ارسال میشه${meta.runtime==="railway"?"":" (نیازمند Cron Trigger در wrangler.toml)"}</small></div>${sw("auto",S.auto_backup==="1","auto")}</div>
-    <div class="sr"><span>هر چند ساعت</span><select id="every" style="width:auto">${[[6,"۶ ساعت"],[12,"۱۲ ساعت"],[24,"روزانه"],[72,"۳ روز"],[168,"هفتگی"]].map(([h,l])=>`<option value="${h}" ${S.backup_every_h==h?"selected":""}>${l}</option>`).join("")}</select></div></div></div>
-  <div class="card"><h3>${ic("up")}بازیابی از فایل بکاپ</h3><div class="drop" id="drop" tabindex="0">فایل <span class="mono">.json</span> بکاپ رو اینجا بنداز یا کلیک کن<input type="file" id="bkfile" accept=".json,application/json" hidden></div><div id="rs" style="margin-top:12px"></div></div></div>
-  <div class="card" style="margin-top:16px"><h3>${ic("db")}محتوای فعلی</h3><dl class="kv">${meta.tables.map(t=>`<dt>${t.name}</dt><dd>${fa(t.rows)} ردیف</dd>`).join("")}</dl></div>`;
-  const save=()=>api("/api/settings",{method:"POST",body:{simple:{auto_backup:$("#auto").checked?"1":"0",backup_every_h:$("#every").value}}}).then(()=>toast("ذخیره شد")).catch(e=>toast(e.message,"er"));
-  $("#auto").onchange=save;$("#every").onchange=save;
+  const meta=await api("/api/backup/meta"),node=meta.runtime==="railway";
+  v.innerHTML=head("بکاپ و بازیابی",`همه‌ی داده‌های ربات (کاربران، سفارش‌ها، محصولات، پنل‌ها و تنظیمات) — ${node?"SQLite":"D1"}`)+`
+  <div class="grid g2"><div class="card"><h3>${ic("down")}گرفتن بکاپ</h3>
+    <div class="list" style="margin-bottom:12px"><div class="it"><div class="main-c"><div class="t">فایل JSON</div><div class="m">از همین صفحه روی هر پلتفرمی (Cloudflare یا Railway) قابل بازیابیه</div></div><button class="btn sm pri" data-a="bkdl">${ic("down")}دانلود</button></div>
+    <div class="it"><div class="main-c"><div class="t">فایل SQL فشرده (.sql.gz)</div><div class="m">همون فرمت بکاپ شبانه‌ی ربات؛ با wrangler یا import-sql هم قابل بازیابیه</div></div><button class="btn sm" data-a="bksql">${ic("down")}دانلود</button></div>
+    <div class="it"><div class="main-c"><div class="t">ارسال به تلگرام</div><div class="m">به تاپیک «💾 بکاپ» گروه گزارش (یا پیوی ادمین‌ها اگه گروه وصل نیست)</div></div><button class="btn sm" data-a="bktg">${ic("send")}ارسال</button></div></div>
+    <div class="bar" id="bkbar" hidden><i style="width:0"></i></div>
+    <div class="note">بکاپ شبانه خودکاره (ساعت ۰۰:۰۰ تهران) و داخل تاپیک «💾 بکاپ» گروه گزارش میاد.${node?` آخرین بکاپ شبانه: <b>${meta.nightly?dt(meta.nightly):"هنوز انجام نشده"}</b>`:""} فایل‌ها شامل رمز پنل‌های VPN هم هستن؛ جای امن نگهشون دار.</div></div>
+  <div class="card"><h3>${ic("up")}بازیابی از فایل بکاپ</h3><div class="drop" id="drop" tabindex="0">فایل بکاپ (<span class="mono">.json</span> یا <span class="mono">.sql / .sql.gz</span>) رو اینجا بنداز یا کلیک کن<input type="file" id="bkfile" accept=".json,.sql,.gz,application/json,application/gzip" hidden></div><div id="rs" style="margin-top:12px"></div></div></div>
+  <div class="card" style="margin-top:16px"><h3>${ic("db")}محتوای فعلی</h3><dl class="kv">${meta.tables.map(t=>`<dt>${t.name==="state"?"state (نام سرویس‌ها)":t.name}</dt><dd>${fa(t.rows)} ردیف</dd>`).join("")}</dl></div>`;
   const drop=$("#drop"),inpf=$("#bkfile");drop.onclick=()=>inpf.click();drop.onkeydown=e=>{if(e.key==="Enter")inpf.click()};
   drop.ondragover=e=>{e.preventDefault();drop.classList.add("on")};drop.ondragleave=()=>drop.classList.remove("on");drop.ondrop=e=>{e.preventDefault();drop.classList.remove("on");if(e.dataTransfer.files[0])readBackup(e.dataTransfer.files[0])};inpf.onchange=()=>inpf.files[0]&&readBackup(inpf.files[0]);
 };
 A.bkdl=el=>busy(el,async()=>{const b=$("#bkbar");b.hidden=false;await downloadBackup(p=>{$("i",b).style.width=p*100+"%"});setTimeout(()=>b.hidden=true,1200)});
-A.bktg=el=>busy(el,async()=>{const r=await api("/api/backup/telegram",{method:"POST"});toast(`برای ${fa(r.sent)} ادمین ارسال شد`)});
+A.bksql=el=>busy(el,downloadSql);
+A.bktg=el=>busy(el,async()=>{await api("/api/backup/telegram",{method:"POST"});toast("بکاپ ارسال شد")});
 async function readBackup(file){
-  let d;try{d=JSON.parse(await file.text())}catch{return toast("فایل JSON معتبر نیست","er")}
+  const buf=new Uint8Array(await file.arrayBuffer());
+  const isGz=buf.length>2&&buf[0]===0x1f&&buf[1]===0x8b,isSql=isGz||/\.sql(\.gz)?$/i.test(file.name);
+  if(isSql)return readSqlBackup(file,buf);
+  let d;try{d=JSON.parse(new TextDecoder().decode(buf))}catch{return toast("فایل JSON یا SQL معتبر نیست","er")}
   if(d.format!=="vpnbot-backup"||!d.tables)return toast("این فایل بکاپ این ربات نیست","er");
   const names=BK_ORDER.filter(n=>d.tables[n]);
   $("#rs").innerHTML=`<div class="note"><b>${esc(file.name)}</b> · ${dt(d.created_at)} · ${d.runtime==="railway"?"Railway":"Cloudflare"}</div><dl class="kv" style="margin:10px 0">${names.map(n=>`<dt>${n}</dt><dd>${fa(d.tables[n].rows.length)} ردیف</dd>`).join("")}</dl>
@@ -140,11 +152,24 @@ async function readBackup(file){
   $("#rgo").onclick=async e=>{
     if(!await confirmBox("بازیابی شروع بشه؟ این کار داده‌های فعلی رو تغییر میده.","شروع بازیابی"))return;
     await busy(e.currentTarget,async()=>{
-      const mode=$("[name=mode]").value;$("#rtxt").textContent="گرفتن بکاپ ایمنی...";await downloadBackup();
+      const mode=$("[name=mode]").value;$("#rtxt").textContent="گرفتن بکاپ ایمنی...";await downloadBackup(null,false);
       $("#rbar").hidden=false;const total=names.reduce((n,k)=>n+Math.max(1,Math.ceil(d.tables[k].rows.length/100)),0);let step=0;
       for(const n of names){const t=d.tables[n],rows=t.rows;$("#rtxt").textContent=`در حال بازیابی ${n}...`;
         for(let i=0;i===0||i<rows.length;i+=100){await api("/api/restore",{method:"POST",body:{table:n,columns:t.columns,rows:rows.slice(i,i+100),first:i===0,mode}});step++;$("i",$("#rbar")).style.width=step/total*100+"%"}}
-      await api("/api/restore/finish",{method:"POST"});$("#rtxt").textContent="";toast("بازیابی کامل شد ✅");route()});
+      await api("/api/restore/finish",{method:"POST",body:{mode,tables:names.length,rows:names.reduce((n,k)=>n+d.tables[k].rows.length,0)}});$("#rtxt").textContent="";toast("بازیابی کامل شد ✅");route()});
+  };
+}
+function readSqlBackup(file,buf){
+  if(ME.runtime!=="railway"){$("#rs").innerHTML=`<div class="warn">بازیابی فایل SQL از پنل فقط روی Railway ممکنه. روی Cloudflare یا از «فایل JSON» استفاده کن، یا این دستور رو بزن:<div class="code" style="margin-top:8px">wrangler d1 execute config-sales-bot-db --remote --file=./${esc(file.name.replace(/\.gz$/i,""))}</div>(فایل .gz رو اول از حالت فشرده دربیار)</div>`;return}
+  $("#rs").innerHTML=`<div class="note"><b>${esc(file.name)}</b> · ${bytes(buf.length)} · دامپ SQL</div><div class="warn" style="margin:10px 0">ردیف‌های فایل روی داده‌های فعلی نوشته میشن (هم‌شناسه‌ها بازنویسی میشن)؛ چیزی پاک نمیشه. قبلش یک بکاپ SQL ایمنی دانلود میشه.</div><div class="pd" id="rtxt" style="margin:6px 0"></div><button class="btn bad" id="rgo">${ic("up")}شروع بازیابی</button>`;
+  $("#rgo").onclick=async e=>{
+    if(!await confirmBox("بازیابی شروع بشه؟","شروع بازیابی"))return;
+    await busy(e.currentTarget,async()=>{
+      $("#rtxt").textContent="گرفتن بکاپ ایمنی...";const sr=await fetch("/api/backup/sql",{credentials:"same-origin"});if(sr.ok)saveBlob(await sr.blob(),`safety-${stamp()}.sql.gz`);
+      $("#rtxt").textContent="در حال بازیابی...";
+      const r=await fetch("/api/restore/sql",{method:"POST",headers:{"x-panel":"1"},body:buf,credentials:"same-origin"});const j=await r.json().catch(()=>({ok:false,error:"پاسخ نامعتبر"}));
+      if(!j.ok)throw new Error(j.error||"خطا در بازیابی");
+      $("#rtxt").textContent="";$("#rs").innerHTML=`<div class="note">بازیابی کامل شد ✅</div><dl class="kv" style="margin-top:10px">${Object.entries(j.restored).map(([k,v])=>`<dt>${esc(k)}</dt><dd>${typeof v==="number"?fa(v)+" ردیف":esc(v)}</dd>`).join("")}</dl>`;toast("بازیابی کامل شد ✅")});
   };
 }
 
@@ -153,9 +178,9 @@ PAGES.system=async v=>{
   const s=await api("/api/system"),w=s.webhook,e=s.env;
   const ck=(ok,label,hint="")=>`<div class="sr"><div>${label}${hint?`<small>${hint}</small>`:""}</div>${ok?chip("تنظیم شده","ok"):chip("ندارد","er")}</div>`;
   v.innerHTML=head("سیستم و استقرار","وضعیت ربات، وبهوک و راهنمای استقرار روی Cloudflare و Railway")+`
-  <div class="grid g2"><div class="card"><h3>${ic("send")}ربات و وبهوک</h3><dl class="kv"><dt>ربات</dt><dd>${s.bot?"@"+esc(s.bot.username):"توکن نامعتبر؟"}</dd><dt>اجرا روی</dt><dd>${s.runtime==="railway"?"Railway":"Cloudflare Workers"}</dd><dt>آدرس عمومی</dt><dd class="mono" style="font-size:12px">${esc(s.origin||"—")}</dd><dt>نسخه پنل</dt><dd>${esc(s.version)}</dd></dl>
+  <div class="grid g2"><div class="card"><h3>${ic("send")}ربات و وبهوک</h3><dl class="kv"><dt>ربات</dt><dd>${s.bot?"@"+esc(s.bot.username):"توکن نامعتبر؟"}</dd><dt>اجرا روی</dt><dd>${s.runtime==="railway"?"Railway":"Cloudflare Workers"}</dd>${s.mode?`<dt>حالت دریافت آپدیت</dt><dd>${esc(s.mode)}</dd>`:""}<dt>آدرس عمومی</dt><dd class="mono" style="font-size:12px">${esc(s.origin||"—")}</dd><dt>نسخه پنل</dt><dd>${esc(s.version)}</dd></dl>
     <div style="margin:12px 0">${w?(w.url_set?(w.matches?chip("وبهوک درسته","ok"):chip("وبهوک روی آدرس دیگه‌ایه","wa")):chip("وبهوک تنظیم نیست","er")):chip("وضعیت نامشخص","er")} ${w&&w.pending?chip(fa(w.pending)+" آپدیت در صف","wa"):""}</div>${w?.last_error?`<div class="warn" style="margin-bottom:10px">آخرین خطای تلگرام (${ago(w.last_error_at)}): <span class="mono">${esc(w.last_error)}</span></div>`:""}
-    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" data-a="whset">${ic("plug")}تنظیم وبهوک روی این آدرس</button><button class="btn bad" data-a="whdel">حذف وبهوک</button></div></div>
+    ${s.mode&&s.mode!=="webhook"?`<div class="note" style="margin-bottom:10px">ربات در حالت <b>${esc(s.mode)}</b> اجرا میشه و وبهوک لازم نیست (با <span class="mono">BOT_MODE=webhook</span> عوضش کن).</div>`:""}<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" data-a="whset" ${s.mode&&s.mode!=="webhook"?"disabled":""}>${ic("plug")}تنظیم وبهوک روی این آدرس</button><button class="btn bad" data-a="whdel">حذف وبهوک</button></div></div>
   <div class="card"><h3>${ic("shield")}متغیرهای محیطی</h3>${ck(e.BOT_TOKEN,"BOT_TOKEN")}${ck(e.ADMIN_IDS,"ADMIN_IDS",e.ADMIN_IDS?fa(e.ADMIN_IDS)+" ادمین":"")}${ck(e.WEBHOOK_SECRET,"WEBHOOK_SECRET")}${ck(e.PANEL_PASSWORD,"PANEL_PASSWORD","ورود با رمز (اختیاری)")}${ck(e.KV,"KV","کش مشترک تنظیمات (اختیاری)")}${s.runtime==="cloudflare"?ck(e.CF_API_TOKEN&&e.CF_ACCOUNT_ID,"CF_API_TOKEN + CF_ACCOUNT_ID","آمار مصرف کلادفلر (اختیاری)"):""}</div></div>
   <div class="grid g2" style="margin-top:16px"><div class="card"><h3>${ic("cloud")}استقرار روی Cloudflare</h3><ol class="steps"><li>D1 بساز و <span class="mono">database_id</span> رو در <span class="mono">wrangler.toml</span> بذار.</li><li>(اختیاری) KV بساز و id رو در بخش <span class="mono">[[kv_namespaces]]</span> بذار.</li><li><div class="code">wrangler d1 execute config-sales-bot-db --remote --file=./schema.sql\nwrangler secret put BOT_TOKEN\nwrangler secret put ADMIN_IDS\nwrangler secret put WEBHOOK_SECRET\nwrangler secret put PANEL_PASSWORD\nwrangler deploy</div></li><li>آدرس Worker رو باز کن و «تنظیم وبهوک» رو بزن.</li></ol></div>
   <div class="card"><h3>${ic("server")}استقرار روی Railway</h3><ol class="steps"><li>ریپو رو به GitHub بفرست و در Railway «Deploy from GitHub» بزن.</li><li>یک <b>Volume</b> با مسیر <span class="mono">/data</span> وصل کن (ذخیره‌ی دیتابیس).</li><li>متغیرها: <span class="mono">BOT_TOKEN</span>، <span class="mono">ADMIN_IDS</span>، <span class="mono">WEBHOOK_SECRET</span>، <span class="mono">PANEL_PASSWORD</span>.</li><li>در Settings ← Networking یک دامنه‌ی عمومی بساز. وبهوک خودش تنظیم میشه.</li></ol><div class="note" style="margin-top:12px">برای انتقال بین دو پلتفرم: از «بکاپ و بازیابی» بکاپ بگیر و روی مقصد بازیابی کن.</div></div></div>`;
@@ -168,7 +193,7 @@ const ST={tab:"general",data:null};
 const COLORS=[["primary","آبی"],["success","سبز"],["danger","قرمز"],["none","بدون رنگ"]];
 PAGES.settings=async v=>{
   ST.data=await api("/api/settings");
-  v.innerHTML=head("تنظیمات ربات","متن‌ها، دکمه‌ها، قوانین، گردونه، کانال‌ها و گروه گزارش")+`<div class="tabs">${[["general","عمومی"],["buttons","دکمه‌ها"],["rules","قوانین"],["wheel","گردونه"],["channels","کانال اجباری"],["log","گروه گزارش"]].map(([k,l])=>`<span class="tab ${ST.tab===k?"on":""}" data-a="stab" data-k="${k}" tabindex="0">${l}</span>`).join("")}</div><div id="sb"></div>`;
+  v.innerHTML=head("تنظیمات ربات","متن‌ها، دکمه‌ها، قوانین، گردونه، کانال‌ها و گروه گزارش")+`<div class="tabs">${[["general","عمومی"],["buttons","دکمه‌ها"],["rules","قوانین"],["welcome","خوش‌آمد"],["wheel","گردونه"],["channels","کانال اجباری"],["log","گروه گزارش"]].map(([k,l])=>`<span class="tab ${ST.tab===k?"on":""}" data-a="stab" data-k="${k}" tabindex="0">${l}</span>`).join("")}</div><div id="sb"></div>`;
   drawSettings();
 };
 A.stab=el=>{ST.tab=el.dataset.k;$$(".tab").forEach(t=>t.classList.toggle("on",t===el));drawSettings()};
@@ -189,6 +214,10 @@ function drawSettings(){
     const u=d.ui;
     el.innerHTML=`<div class="card"><div class="sr" style="padding-top:0"><div>نمایش قوانین قبل از استفاده<small>هر کاربر یک‌بار با دکمه‌ی سبز می‌پذیره</small></div>${sw("rules_enabled",u.rules_enabled)}</div>${field("متن قوانین",`<textarea name="rules_text" style="min-height:220px">${esc(u.rules_text||d.defaults.rules_text)}</textarea>`,"HTML مجاز: b, i, u, s, code, pre, a, blockquote")}${field("متن دکمه‌ی پذیرش",inp("rules_btn",u.rules_btn||d.defaults.rules_btn))}<div style="display:flex;gap:8px;flex-wrap:wrap">${saveBtn().replace("margin-top:6px","")}<button class="btn" data-a="rprev">${ic("send")}پیش‌نمایش در تلگرام من</button></div></div>`;
     SAVE=()=>{const f=formData(el);return api("/api/settings",{method:"POST",body:{ui:{rules_enabled:f.rules_enabled,rules_text:f.rules_text,rules_btn:f.rules_btn}}})};
+  }else if(ST.tab==="welcome"){
+    const u=d.ui;
+    el.innerHTML=`<div class="card"><p class="pd" style="margin-bottom:12px">متغیرهای قابل استفاده: <span class="mono">{name}</span> نام کاربر، <span class="mono">{username}</span> یوزرنیم، <span class="mono">{id}</span> آیدی، <span class="mono">{bot}</span> نام ربات.</p>${field("متن خوش‌آمد (کاربر جدید)",`<textarea name="welcome_text" style="min-height:140px">${esc(u.welcome_text||d.defaults.welcome_text)}</textarea>`,"HTML تلگرام مجازه")}${field("متن بازگشت (کاربر قبلی)",`<textarea name="welcome_back_text">${esc(u.welcome_back_text||d.defaults.welcome_back_text)}</textarea>`)}${saveBtn().replace("margin-top:6px","")}</div>`;
+    SAVE=()=>{const f=formData(el);return api("/api/settings",{method:"POST",body:{ui:{welcome_text:f.welcome_text,welcome_back_text:f.welcome_back_text}}})};
   }else if(ST.tab==="wheel"){
     ST.wheel=d.wheel.map(x=>({...x}));drawWheel();
   }else if(ST.tab==="channels"){

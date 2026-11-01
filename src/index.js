@@ -5,13 +5,13 @@
  * زیرمجموعه‌گیری با کمیسیون، گردونه شانس، عضویت اجباری، پنل مدیریت کامل دکمه‌ای.
  *
  * ENV (secret): BOT_TOKEN, ADMIN_IDS (کاما جدا), WEBHOOK_SECRET
- * Binding: DB (D1)  |  اختیاری: KV (کش تنظیمات) + پنل وب (/panel)
+ * Binding: DB (D1)
  */
 
 import { PANEL_TYPES, hydratePanel, randomId, isIpHost, customPort, panelCreateUser, panelUsage, panelRenew, panelTest, panelFindUser, panelRenewExisting, ownsSubscription, clearPanelCache } from "./panels.js";
 import { qrPng } from "./qr.js";
 import { getSettingCached, setSettingCached } from "./web/optimizer.js";
-import { handleWeb, runScheduled, setOrigin, createLoginLink } from "./web/api.js";
+import { handleWeb, setOrigin, createLoginLink, runPanelCleanup } from "./web/api.js";
 
 const TG = (token) => `https://api.telegram.org/bot${token}`;
 
@@ -44,6 +44,11 @@ const DEFAULT_RULES_TEXT =
   "۴. هرگونه سوءاستفاده (تقلب در رفرال، ساخت حساب‌های متعدد برای تست رایگان و ...) باعث مسدود شدن حساب میشه.\n" +
   "۵. پشتیبانی فقط از طریق همین ربات انجام میشه.\n\n" +
   "با زدن دکمه زیر، قوانین رو خوندی و قبول می‌کنی.";
+
+// متن‌های خوشامدگویی (قابل ویرایش توسط ادمین؛ متغیرها: {name} {username} {id} {bot})
+const DEFAULT_WELCOME_TEXT =
+  "سلام «{name}» 👋\nبه {bot} خوش اومدی!\n\nاز منوی زیر می‌تونی خرید کنی، تست بگیری، کیف پولت رو شارژ کنی و خیلی کارای دیگه 👇";
+const DEFAULT_WELCOME_BACK_TEXT = "خوش برگشتی! از منوی زیر استفاده کن:";
 
 // تنظیمات از دیتابیس خونده میشه ولی کش میشه (سقف ۵۰ کوئری در هر اجرا روی پلن رایگان)
 const uiCache = new WeakMap();
@@ -189,6 +194,17 @@ const answerCallback = (env, id, text, showAlert = false) =>
   tgCall(env, "answerCallbackQuery", { callback_query_id: id, text, show_alert: showAlert });
 const editMessageText = (env, chatId, messageId, text, extra = {}) =>
   tgCall(env, "editMessageText", { chat_id: chatId, message_id: messageId, text, parse_mode: "HTML", ...extra });
+// نمایش مرحله‌ی بعد: اگه msgId داریم همون پیام قبلی ویرایش میشه (نه پیام جدید)؛
+// اگه ویرایش ممکن نبود، پیام قبلی پاک و پیام جدید فرستاده میشه
+async function showStep(env, chatId, msgId, text, extra = {}) {
+  if (msgId) {
+    const r = await editMessageText(env, chatId, msgId, text, extra);
+    if (r.ok) return { ok: true, result: { message_id: msgId } };
+    if (/not modified/i.test(r.description || "")) return { ok: true, result: { message_id: msgId } };
+    await tgCall(env, "deleteMessage", { chat_id: chatId, message_id: msgId });
+  }
+  return sendMessage(env, chatId, text, extra);
+}
 const escapeHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const fmtMoney = (n) => Number(n || 0).toLocaleString("fa-IR") + " تومان";
 
@@ -305,7 +321,9 @@ function adminMainMenu() {
         [{ text: "👥 مدیریت کاربران", callback_data: "adm:users" }],
         [{ text: "🔎 اشتراک قبلی و QR", callback_data: "adm:sub" }],
         [{ text: "📜 قوانین", callback_data: "adm:rules" }],
+        [{ text: "👋 متن خوشامدگویی", callback_data: "adm:welcome" }],
         [{ text: "🎨 شخصی‌سازی دکمه‌ها", callback_data: "adm:ui" }],
+        [{ text: "💾 بکاپ دیتابیس (همین حالا)", callback_data: "adm:backup" }],
         [{ text: "📣 گروه گزارش", callback_data: "adm:log" }],
         [{ text: "📊 آمار", callback_data: "adm:stats" }],
         [{ text: "📢 پیام همگانی", callback_data: "adm:broadcast" }],
@@ -426,6 +444,7 @@ const LOG_TOPICS = {
   orders: { name: "🛒 خرید و تمدید", color: 13338331, label: "🛒 خرید و تمدید" },
   wallet: { name: "💰 کیف پول", color: 16749490, label: "💰 شارژ کیف پول" },
   errors: { name: "⚠️ خطاها", color: 16478047, label: "⚠️ خطاها" },
+  backup: { name: "💾 بکاپ", color: 6591981, label: "💾 بکاپ شبانه" },
 };
 async function getLogCfg(env) {
   const c = safeJson(await getSetting(env, "log_cfg", ""));
@@ -470,6 +489,221 @@ async function logEvent(env, key, text, { photo = null } = {}) {
     }
   } catch (e) {
     console.error("logEvent error", e);
+  }
+}
+// ---------- پیام همگانی (کار پس‌زمینه‌ای، قابل ادامه، با رعایت سرعت تلگرام) ----------
+// وضعیت کار توی state با کلید bc:job ذخیره میشه (cursor = آخرین آیدی کاربر).
+//  • Railway/سرور: بدون سقف و با سرعت ~۲۵ پیام در ثانیه تا آخر ادامه پیدا می‌کنه (حتی بعد از ری‌استارت).
+//  • Cloudflare رایگان: هر بار حداکثر ۴۰ پیام (سقف ۵۰ تماس خروجی)؛ بقیه با Cron هر دقیقه ادامه پیدا می‌کنه.
+const BC_KEY = "bc:job";
+const sleepMs = (ms) => new Promise((ok) => setTimeout(ok, ms));
+const bcStopKb = { inline_keyboard: [[{ text: "⛔ توقف ارسال", callback_data: "adm:bcstop" }]] };
+const bcReport = (job, head) =>
+  `${head}\n\n👥 کل گیرنده‌ها: ${job.total}\n✅ موفق: ${job.sent}\n🚫 بلاک‌کرده/غیرفعال: ${job.blocked}\n❌ ناموفق: ${job.failed}`;
+
+async function bcSendOne(env, job, userId) {
+  const kb = mainMenuKeyboard(isAdmin(env, userId));
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let r;
+    try {
+      r = await sendMessage(env, userId, job.text, kb);
+    } catch {
+      return "fail";
+    }
+    if (r.ok) return "ok";
+    if (r.error_code === 429 && attempt === 0) {
+      await sleepMs(Math.min(r.parameters?.retry_after || 1, 10) * 1000 + 200);
+      continue;
+    }
+    if (r.error_code === 403) return "blocked"; // کاربر ربات رو بلاک کرده / حسابش حذف شده
+    return "fail";
+  }
+  return "fail";
+}
+async function bcFinish(env, job, head) {
+  await stateDelete(env, BC_KEY);
+  const text = bcReport(job, head);
+  if (job.msg_id) {
+    const r = await editMessageText(env, job.chat_id, job.msg_id, text, { reply_markup: { inline_keyboard: [] } });
+    if (r.ok) return;
+  }
+  await sendMessage(env, job.chat_id, text);
+}
+// شروع کار؛ خروجی: {ok} یا {error}
+async function startBroadcast(env, adminId, chatId, text) {
+  if (await stateGet(env, BC_KEY)) return { error: "یک پیام همگانی هنوز در حال ارساله. صبر کن تموم بشه یا «⛔ توقف ارسال» رو بزن." };
+  // اگه متن (مثلاً تگ HTML) نامعتبر باشه همین‌جا مشخص میشه، نه بعد از خراب‌شدن برای همه‌ی کاربرها
+  const probe = await sendMessage(env, chatId, text, mainMenuKeyboard(true));
+  if (!probe.ok) return { error: `متن نامعتبره (${probe.description || "خطای فرمت"}). تگ‌های HTML رو چک کن یا بدون تگ بفرست.` };
+  const total = await env.DB.prepare("SELECT COUNT(*) c FROM users WHERE registered=1 AND is_banned=0 AND id<>?").bind(adminId).first("c");
+  const job = { text, admin_id: adminId, chat_id: chatId, total: total || 0, last_id: 0, sent: 0, failed: 0, blocked: 0, started: Date.now(), status: "running" };
+  const prog = await sendMessage(env, chatId, `📢 ✅ یک نسخه برای خودت (بالا) فرستاده شد.\n⏳ ارسال برای ${job.total} کاربر شروع شد...`, { reply_markup: bcStopKb });
+  job.msg_id = prog?.result?.message_id || null;
+  await stateSet(env, BC_KEY, JSON.stringify(job));
+  return { ok: true, total: job.total };
+}
+async function stopBroadcast(env) {
+  const raw = await stateGet(env, BC_KEY);
+  if (!raw) return false;
+  await bcFinish(env, JSON.parse(raw), "⛔ ارسال متوقف شد");
+  return true;
+}
+// یک «تیک» کار: unlimited=true (سرور) تا ~۲۰ ثانیه ادامه می‌ده؛ وگرنه حداکثر maxSends پیام (Cloudflare)
+async function runBroadcastTick(env, { maxSends = 40, unlimited = false } = {}) {
+  const raw = await stateGet(env, BC_KEY);
+  if (!raw) return { idle: true };
+  const job = JSON.parse(raw);
+  if (Date.now() - (job.started || 0) > 24 * 3600 * 1000) {
+    await stateDelete(env, BC_KEY); // کار قدیمی/باقی‌مونده (مثلاً بعد از بازیابی بکاپ) ارسال نمیشه
+    return { idle: true };
+  }
+  if (!unlimited) {
+    // قفل سبک: اگه Cron و پنل/درخواست دیگه همزمان تیک بزنن، یک پیام دو بار برای یک نفر نره
+    const lk = Number((await stateGet(env, "bc:lock")) || 0);
+    if (lk && Date.now() - lk < 25000) return { done: false, busy: true };
+    await stateSet(env, "bc:lock", String(Date.now()));
+  }
+  try {
+    return await runBroadcastTickInner(env, job, { maxSends, unlimited });
+  } finally {
+    if (!unlimited) await stateDelete(env, "bc:lock").catch(() => {});
+  }
+}
+async function runBroadcastTickInner(env, job, { maxSends, unlimited }) {
+  await loadUiCfg(env); // کش رو گرم می‌کنه تا ارسال‌های همزمان کوئری تکراری نزنن
+  const t0 = Date.now();
+  let done = false, sentNow = 0;
+  while (unlimited ? Date.now() - t0 < 20000 : sentNow < maxSends) {
+    const n = unlimited ? 25 : Math.min(25, maxSends - sentNow);
+    const { results } = await env.DB.prepare("SELECT id FROM users WHERE registered=1 AND is_banned=0 AND id>? AND id<>? ORDER BY id LIMIT ?")
+      .bind(job.last_id, job.admin_id, n).all();
+    if (!results.length) {
+      done = true;
+      break;
+    }
+    const g0 = Date.now();
+    const out = await Promise.all(results.map((u) => bcSendOne(env, job, u.id)));
+    for (const o of out) {
+      if (o === "ok") job.sent++;
+      else if (o === "blocked") job.blocked++;
+      else job.failed++;
+    }
+    job.last_id = results[results.length - 1].id;
+    sentNow += results.length;
+    await stateSet(env, BC_KEY, JSON.stringify(job));
+    if (unlimited && Date.now() - g0 < 1000) await sleepMs(1000 - (Date.now() - g0)); // حدود ۲۵ پیام در ثانیه
+  }
+  if (done) {
+    await bcFinish(env, job, "📢 <b>ارسال همگانی تموم شد</b> ✅");
+    return { done: true };
+  }
+  if (job.msg_id) {
+    await editMessageText(env, job.chat_id, job.msg_id, bcReport(job, `📢 در حال ارسال... (${job.sent + job.blocked + job.failed}/${job.total})`), { reply_markup: bcStopKb });
+  }
+  return { done: false };
+}
+
+// ---------- بکاپ دیتابیس ----------
+// خروجی یک فایل SQL فشرده‌ست (INSERT OR REPLACE) که هم روی D1 و هم روی SQLite (Railway) قابل بازیابیه
+const BACKUP_SKIP = /^(sqlite_|_cf_|d1_)/;
+const sqlLit = (v) =>
+  v === null || v === undefined ? "NULL"
+  : typeof v === "number" ? (Number.isFinite(v) ? String(v) : "NULL")
+  : typeof v === "bigint" ? String(v)
+  : `'${String(v).replace(/'/g, "''")}'`;
+async function dumpDatabaseSql(env) {
+  const schema = (
+    await env.DB.prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY CASE type WHEN 'table' THEN 0 ELSE 1 END, name").all()
+  ).results || [];
+  const tables = schema.filter((r) => r.type === "table" && !BACKUP_SKIP.test(r.name));
+  const indexes = schema.filter((r) => r.type === "index" && !BACKUP_SKIP.test(r.name));
+  const out = ["-- vpnbot backup", `-- ${new Date().toISOString()}`, "PRAGMA foreign_keys=OFF;", "BEGIN TRANSACTION;"];
+  for (const t of tables) out.push(t.sql.replace(/^CREATE TABLE\s+(IF NOT EXISTS\s+)?/i, "CREATE TABLE IF NOT EXISTS ") + ";");
+  const counts = {};
+  for (const t of tables) {
+    const qn = `"${t.name.replace(/"/g, '""')}"`;
+    counts[t.name] = 0;
+    for (let offset = 0; ; offset += 2000) {
+      const { results } = await env.DB.prepare(`SELECT * FROM ${qn} ORDER BY rowid LIMIT 2000 OFFSET ?`).bind(offset).all();
+      if (!results || !results.length) break;
+      for (const row of results) {
+        const cols = Object.keys(row);
+        out.push(`INSERT OR REPLACE INTO ${qn} (${cols.map((c) => `"${c.replace(/"/g, '""')}"`).join(",")}) VALUES (${cols.map((c) => sqlLit(row[c])).join(",")});`);
+      }
+      counts[t.name] += results.length;
+      if (results.length < 2000) break;
+    }
+  }
+  for (const i of indexes) out.push(i.sql.replace(/^CREATE (UNIQUE )?INDEX\s+(IF NOT EXISTS\s+)?/i, "CREATE $1INDEX IF NOT EXISTS ") + ";");
+  out.push("COMMIT;", "");
+  return { sql: out.join("\n"), counts };
+}
+async function gzipText(text) {
+  const stream = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+async function sendDocumentRaw(env, fields, bytes, filename) {
+  const fd = new FormData();
+  for (const [k, v] of Object.entries(fields)) if (v !== undefined && v !== null) fd.append(k, String(v));
+  fd.append("document", new Blob([bytes], { type: "application/gzip" }), filename);
+  const res = await fetch(`${TG(env.BOT_TOKEN)}/sendDocument`, { method: "POST", body: fd });
+  return res.json();
+}
+// ساخت بکاپ و فرستادن به تاپیک «💾 بکاپ» گروه گزارش؛ اگه گروه وصل نیست یا تاپیک خاموشه، به پیوی ادمین‌ها
+async function sendBackupToLog(env, { auto = true } = {}) {
+  try {
+    const tz = env.BACKUP_TZ || "Asia/Tehran";
+    const stamp = new Date().toLocaleString("sv-SE", { timeZone: tz }); // 2026-10-28 00:00:03
+    const { sql, counts } = await dumpDatabaseSql(env);
+    const gz = await gzipText(sql);
+    if (gz.length > 49 * 1024 * 1024) {
+      const msg = "حجم بکاپ از سقف ۵۰ مگابایتی تلگرام بیشتره؛ باید دستی بکاپ گرفته بشه.";
+      await logEvent(env, "errors", `🔥 <b>خطای بکاپ</b>\n${msg}`);
+      return { ok: false, error: msg };
+    }
+    const fname = `backup-${stamp.slice(0, 10)}_${stamp.slice(11, 16).replace(":", "")}.sql.gz`;
+    const caption = [
+      auto ? "💾 <b>بکاپ شبانه‌ی دیتابیس</b>" : "💾 <b>بکاپ دستی دیتابیس</b>",
+      `🗓 ${stamp} (${tz})`,
+      `👥 کاربران: ${counts.users ?? 0} | 🧾 سفارش‌ها: ${counts.orders ?? 0} | 📦 محصولات: ${counts.products ?? 0}`,
+      `📎 حجم فایل: ${(gz.length / 1024).toFixed(1)} KB`,
+    ].join("\n");
+    const cfg = await getLogCfg(env);
+    let sent = false;
+    if (cfg.chat_id && !cfg.off.includes("backup")) {
+      let tid = cfg.topics.backup || null;
+      for (let attempt = 0; attempt < 2 && !sent; attempt++) {
+        if (!tid) {
+          const t = await ensureLogTopic(env, cfg, "backup");
+          tid = typeof t === "number" ? t : null; // گروه فروم نیست → بدون تاپیک
+        }
+        const r = await sendDocumentRaw(env, { chat_id: cfg.chat_id, ...(tid ? { message_thread_id: tid } : {}), caption, parse_mode: "HTML" }, gz, fname);
+        if (r.ok) {
+          sent = true;
+          break;
+        }
+        if (tid && /thread not found|TOPIC_DELETED|TOPIC_CLOSED|topic.*(deleted|closed)/i.test(r.description || "")) {
+          delete cfg.topics.backup;
+          await saveLogCfg(env, cfg);
+          tid = null;
+          continue;
+        }
+        console.error("backup send to log failed", r.description);
+        break;
+      }
+    }
+    if (!sent) {
+      const admins = (env.ADMIN_IDS || "").split(",").map((x) => x.trim()).filter(Boolean);
+      for (const a of admins) {
+        const r = await sendDocumentRaw(env, { chat_id: a, caption, parse_mode: "HTML" }, gz, fname);
+        if (r.ok) sent = true;
+      }
+    }
+    return sent ? { ok: true } : { ok: false, error: "ارسال فایل بکاپ به تلگرام ناموفق بود." };
+  } catch (e) {
+    console.error("backup error", e);
+    await logEvent(env, "errors", `🔥 <b>خطای بکاپ</b>\n<code>${escapeHtml(String(e?.message || e)).slice(0, 600)}</code>`);
+    return { ok: false, error: String(e?.message || e) };
   }
 }
 async function logUserTag(env, userId) {
@@ -655,15 +889,24 @@ async function fulfillPurchase(env, order) {
       const panel = await getPanel(env, product.panel_id);
       if (!panel || !panel.enabled) return { ok: false, reason: "panel_error", detail: "پنل متصل به این محصول پیدا نشد یا غیرفعاله." };
       let created;
-      try {
-        created = await panelCreateUser(panel, {
-          username: genPanelUsername(order.user_id),
+      // نام دلخواه کاربر (در panel_username سفارش)؛ اگه نبود نام پیش‌فرض. اگه نام تکراری بود یک‌بار با پسوند تصادفی تلاش میشه
+      const wanted = order.panel_username || null;
+      const mkUser = (username) =>
+        panelCreateUser(panel, {
+          username,
           gb: order.gb ?? product.data_limit_gb ?? 0,
           days: order.days ?? product.duration_days ?? 0,
           note: `tg:${order.user_id} order:${order.id}`,
         });
+      try {
+        created = await mkUser(wanted || genPanelUsername(order.user_id));
       } catch (e) {
-        return { ok: false, reason: "panel_error", detail: e.message };
+        if (!wanted) return { ok: false, reason: "panel_error", detail: e.message };
+        try {
+          created = await mkUser(`${wanted}_${randomId(3)}`);
+        } catch (e2) {
+          return { ok: false, reason: "panel_error", detail: e2.message };
+        }
       }
       await env.DB.prepare(
         "UPDATE orders SET status='approved', config_text=?, decided_at=?, panel_id=?, panel_username=?, panel_extra=? WHERE id=?"
@@ -749,6 +992,23 @@ const fulfillOrder = async (env, order) => {
 };
 
 // ---------- ثبت‌نام کاربر ----------
+// ساخت متن خوشامد با جایگزینی متغیرها (مقادیر کاربر escape میشن چون parse_mode=HTML)
+async function renderWelcome(env, cfg, tgUser, kind = "new", rawText = null) {
+  const botName = await getSetting(env, "bot_display_name", "ربات فروش کانفیگ");
+  const tpl =
+    rawText ??
+    (kind === "back"
+      ? cfg.welcome_back_text || DEFAULT_WELCOME_BACK_TEXT
+      : cfg.welcome_text || DEFAULT_WELCOME_TEXT);
+  const vars = {
+    name: tgUser.first_name || "",
+    username: tgUser.username ? "@" + tgUser.username : "",
+    id: String(tgUser.id ?? ""),
+    bot: botName,
+  };
+  return tpl.replace(/\{(name|username|id|bot)\}/g, (_, k) => escapeHtml(vars[k]));
+}
+
 async function completeRegistration(env, tgUser, referrerId) {
   const userId = tgUser.id;
   const user = await getUser(env, userId);
@@ -777,13 +1037,14 @@ async function completeRegistration(env, tgUser, referrerId) {
     "users",
     `👤 <b>کاربر جدید</b>\n${await logUserTag(env, userId)}${referrerId && String(referrerId) !== String(userId) ? `\n🤝 معرف: <code>${referrerId}</code>` : ""}`
   );
-  const botName = await getSetting(env, "bot_display_name", "ربات فروش کانفیگ");
-  await sendMessage(
-    env,
-    userId,
-    `سلام «${escapeHtml(tgUser.first_name || "")}» 👋\nبه ${escapeHtml(botName)} خوش اومدی!\n\nاز منوی زیر می‌تونی خرید کنی، تست بگیری، کیف پولت رو شارژ کنی و خیلی کارای دیگه 👇`,
-    mainMenuKeyboard(isAdmin(env, userId))
-  );
+  const cfgW = await loadUiCfg(env);
+  const welcomeText = await renderWelcome(env, cfgW, tgUser, "new");
+  const sent = await sendMessage(env, userId, welcomeText, mainMenuKeyboard(isAdmin(env, userId)));
+  if (sent && sent.ok === false) {
+    // اگه متن سفارشی به هر دلیلی ارسال نشد، متن پیش‌فرض می‌رسه تا کاربر بدون منو نمونه
+    const fallback = await renderWelcome(env, {}, tgUser, "new");
+    await sendMessage(env, userId, fallback, mainMenuKeyboard(isAdmin(env, userId)));
+  }
 }
 
 // ---------- شروع فرآیند خرید/شارژ (نمایش شماره کارت و درخواست رسید) ----------
@@ -896,7 +1157,7 @@ async function continueStart(env, tgUser, chatId) {
   }
   const dbUser = await getUser(env, userId);
   if (dbUser && dbUser.registered) {
-    await sendMessage(env, chatId, "خوش برگشتی! از منوی زیر استفاده کن:", mainMenuKeyboard(isAdmin(env, userId)));
+    await sendMessage(env, chatId, await renderWelcome(env, await loadUiCfg(env), tgUser, "back"), mainMenuKeyboard(isAdmin(env, userId)));
     return;
   }
   const pendingRef = await stateGet(env, `pending_ref:${userId}`);
@@ -981,14 +1242,9 @@ async function handleMessage(env, message) {
   if (isAdmin(env, userId) && /^\/panel(@\w+)?$/i.test(text)) {
     const link = await createLoginLink(env, userId);
     if (!link) {
-      await sendMessage(env, chatId, "⚠️ آدرس عمومی Worker مشخص نیست. یک‌بار آدرس پنل رو توی مرورگر باز کن و دوباره /panel بزن.");
+      await sendMessage(env, chatId, "⚠️ آدرس عمومی سرور مشخص نیست. یک‌بار آدرس پنل (آدرس سرور + /panel) رو توی مرورگر باز کن و دوباره /panel بزن.");
     } else {
-      await sendMessage(
-        env,
-        chatId,
-        `🖥 <b>پنل وب</b>\nلینک ورود یک‌بار مصرفه و ۵ دقیقه اعتبار داره:\n${link}`,
-        { disable_web_page_preview: true }
-      );
+      await sendMessage(env, chatId, `🖥 <b>پنل وب</b>\nلینک ورود یک‌بار مصرفه و ۵ دقیقه اعتبار داره:\n${link}`, { disable_web_page_preview: true });
     }
     return;
   }
@@ -1062,7 +1318,7 @@ async function handleMessage(env, message) {
       return;
     }
     if (dbUser.registered) {
-      await sendMessage(env, chatId, "خوش برگشتی! از منوی زیر استفاده کن:", mainMenuKeyboard(isAdmin(env, userId)));
+      await sendMessage(env, chatId, await renderWelcome(env, cfg, message.from, "back"), mainMenuKeyboard(isAdmin(env, userId)));
       return;
     }
     await completeRegistration(env, message.from, referrerId);
@@ -1115,7 +1371,7 @@ async function handleMessage(env, message) {
     const rows = [];
     for (const o of panelSvc.results || []) {
       const plan = renewPlan(o);
-      rows.push([{ text: `♻️ ${o.pname} #${String(o.panel_username).slice(-4)} — ${fmtMoney(plan.price)}`, callback_data: `renew:${o.id}` }]);
+      rows.push([{ text: `♻️ ${o.pname} #${/^bot\d+x/.test(String(o.panel_username)) ? String(o.panel_username).slice(-4) : o.panel_username} — ${fmtMoney(plan.price)}`, callback_data: `renew:${o.id}` }]);
     }
     for (const pr of manual.results || []) {
       rows.push([{ text: `${pr.name} — ${fmtMoney(pr.price)}`, callback_data: `buy:${pr.id}` }]);
@@ -1193,92 +1449,8 @@ async function handleMessage(env, message) {
   }
 
   if (mk === "services") {
-    const { results } = await env.DB.prepare(
-      `SELECT o.*, p.name as pname FROM orders o LEFT JOIN products p ON p.id=o.product_id
-       WHERE o.user_id=? AND o.type='purchase' AND o.status='approved' ORDER BY o.decided_at DESC LIMIT 10`
-    ).bind(userId).all();
-    const exts = (
-      await env.DB.prepare("SELECT * FROM ext_services WHERE user_id=? AND (verified=1 OR ?=1) ORDER BY id DESC LIMIT 5")
-        .bind(userId, cfg.ext_verify === false ? 1 : 0).all()
-    ).results || [];
-    if (!results.length && !exts.length) {
-      await sendMessage(env, chatId, "هنوز هیچ سرویس فعالی نداری.");
-      return;
-    }
-    // مصرف زنده از پنل (سقف تعداد، برای رد نشدن از محدودیت درخواست‌های Worker)
-    const usages = await Promise.all(
-      results.map(async (o, i) => {
-        if (!o.panel_id || i >= 5) return null;
-        try {
-          const panel = await getPanel(env, o.panel_id);
-          if (!panel) throw new Error("پنل پیدا نشد");
-          return { ok: true, u: await panelUsage(panel, { username: o.panel_username, extra: safeJson(o.panel_extra) }) };
-        } catch (e) {
-          return { ok: false, err: e.message };
-        }
-      })
-    );
-    const extInfo = await Promise.all(
-      exts.map(async (e) => {
-        try {
-          const panel = await getPanel(env, e.panel_id);
-          if (!panel) throw new Error("پنل پیدا نشد");
-          const found = await panelFindUser(panel, e.username);
-          return found ? { ok: true, panel, found } : { ok: false };
-        } catch {
-          return { ok: false };
-        }
-      })
-    );
-    const blocks = results.map((o, i) => {
-      const lines = [`📦 <b>${escapeHtml(o.pname || "-")}</b> — ${new Date(o.decided_at).toLocaleDateString("fa-IR")}`];
-      const us = usages[i];
-      if (us && us.ok) {
-        lines.push(`📊 مصرف: ${fmtBytes(us.u.used)} از ${us.u.total ? fmtBytes(us.u.total) : "نامحدود"}`);
-        lines.push(`⏳ انقضا: ${fmtExpire(us.u.expire)}`);
-        if (us.u.status && us.u.status !== "active") lines.push(`⚠️ وضعیت: ${escapeHtml(us.u.status)}`);
-      } else if (us) {
-        lines.push("⚠️ دریافت مصرف از پنل ممکن نشد");
-      }
-      lines.push(`<code>${escapeHtml(o.config_text)}</code>`);
-      return lines.join("\n");
-    });
-    exts.forEach((e, i) => {
-      const x = extInfo[i];
-      const lines = [`🔎 <b>${escapeHtml(e.username)}</b> (اشتراک قبلی)${x.ok ? ` — ${escapeHtml(x.panel.name)}` : ""}`];
-      if (x.ok) {
-        lines.push(`📊 مصرف: ${fmtBytes(x.found.used)} از ${x.found.total ? fmtBytes(x.found.total) : "نامحدود"}`);
-        lines.push(`⏳ انقضا: ${fmtExpire(x.found.expire)}`);
-        if (x.found.status !== "active") lines.push(`وضعیت: ${STATUS_FA[x.found.status] || escapeHtml(x.found.status)}`);
-        if (x.found.subUrl) lines.push(`<code>${escapeHtml(x.found.subUrl)}</code>`);
-      } else {
-        lines.push("⚠️ دریافت اطلاعات از پنل ممکن نشد");
-      }
-      blocks.push(lines.join("\n"));
-    });
-    // دکمه‌های QR
-    const qrRows = [];
-    if (cfg.qr_enabled !== false) {
-      for (const o of results) if (o.config_text && qrRows.length < 10) qrRows.push([{ text: `📲 QR ${o.pname || ""} #${o.id}`.slice(0, 40), callback_data: `qr:o:${o.id}` }]);
-      exts.forEach((e, i) => {
-        if (extInfo[i].ok && extInfo[i].found.subUrl && qrRows.length < 10) qrRows.push([{ text: `📲 QR ${e.username}`.slice(0, 40), callback_data: `qr:e:${e.id}` }]);
-      });
-    }
-    // محدودیت طول پیام تلگرام (۴۰۹۶): در چند پیام می‌فرستیم؛ دکمه‌ها زیر آخرین پیام
-    const chunks = [];
-    let chunk = "";
-    for (const b of blocks) {
-      if (chunk && chunk.length + b.length > 3500) {
-        chunks.push(chunk);
-        chunk = "";
-      }
-      chunk += (chunk ? "\n\n" : "") + b;
-    }
-    if (chunk) chunks.push(chunk);
-    for (let i = 0; i < chunks.length; i++) {
-      const last = i === chunks.length - 1;
-      await sendMessage(env, chatId, chunks[i], last && qrRows.length ? { reply_markup: { inline_keyboard: qrRows } } : {});
-    }
+    const v = await buildServiceList(env, userId, cfg);
+    await sendMessage(env, chatId, v.text, v.reply_markup ? { reply_markup: v.reply_markup } : {});
     return;
   }
 
@@ -1464,12 +1636,231 @@ async function loadExtForUser(env, cfg, userId, extId) {
   if (!ext) return null;
   return ext.verified === 1 || cfg.ext_verify === false ? ext : null;
 }
-async function showExtPlans(env, chatId, ext) {
+// ---------- سرویس‌های من: لیست اسم‌ها ← صفحه‌ی جزئیات ----------
+// نام نمایشی (که کاربر عوض می‌کنه) توی جدول state ذخیره میشه: svcname:<userId>:<o|e>:<id> (بدون مایگریشن)
+const svcNameKey = (userId, kind, id) => `svcname:${userId}:${kind}:${id}`;
+async function loadSvcNames(env, userId) {
+  const prefix = `svcname:${userId}:`;
+  const { results } = await env.DB.prepare("SELECT key, value FROM state WHERE key LIKE ?").bind(`${prefix}%`).all();
+  const m = {};
+  for (const r of results || []) m[r.key.slice(prefix.length)] = r.value;
+  return m;
+}
+async function buildServiceList(env, userId, cfg) {
+  const { results } = await env.DB.prepare(
+    `SELECT o.id, o.panel_id, o.panel_username, p.name as pname FROM orders o LEFT JOIN products p ON p.id=o.product_id
+     WHERE o.user_id=? AND o.type='purchase' AND o.status='approved' ORDER BY o.decided_at DESC LIMIT 20`
+  ).bind(userId).all();
+  const exts = (
+    await env.DB.prepare("SELECT * FROM ext_services WHERE user_id=? AND (verified=1 OR ?=1) ORDER BY id DESC LIMIT 10")
+      .bind(userId, cfg.ext_verify === false ? 1 : 0).all()
+  ).results || [];
+  if (!results.length && !exts.length) return { text: "هنوز هیچ سرویس فعالی نداری." };
+  const names = await loadSvcNames(env, userId);
+  const rows = [];
+  for (const o of results) {
+    const label = names[`o:${o.id}`] || (o.panel_id && o.panel_username ? o.panel_username : `${o.pname || "سرویس"} #${o.id}`);
+    rows.push([{ text: `📦 ${label}`.slice(0, 60), callback_data: `sv:o:${o.id}` }]);
+  }
+  for (const e of exts) rows.push([{ text: `🔎 ${names[`e:${e.id}`] || e.username}`.slice(0, 60), callback_data: `sv:e:${e.id}` }]);
+  return { text: "📋 <b>سرویس‌های من</b>\nبرای دیدن جزئیات، لینک و مدیریت، روی اسم سرویس بزن:", reply_markup: { inline_keyboard: rows } };
+}
+function usageLines(u) {
+  const lines = [];
+  lines.push(`📊 حجم کل سرویس: ${u.total ? fmtBytes(u.total) : "نامحدود"}`);
+  if (u.total) lines.push(`🔋 حجم باقی‌مانده: <b>${fmtBytes(Math.max(0, u.total - u.used))}</b>`);
+  lines.push(`📉 مصرف‌شده: ${fmtBytes(u.used)}`);
+  if (u.expire) {
+    const left = Math.ceil((u.expire * 1000 - Date.now()) / 86400000);
+    lines.push(left >= 0 ? `⏳ روزهای باقی‌مانده: <b>${left.toLocaleString("fa-IR")} روز دیگر</b>` : "⏳ مدت سرویس: منقضی شده ⛔");
+  } else {
+    lines.push("⏳ مدت سرویس: نامحدود");
+  }
+  if (u.status && u.status !== "active") lines.push(`⚠️ وضعیت: ${STATUS_FA[u.status] || escapeHtml(u.status)}`);
+  return lines;
+}
+// لینک اشتراک یک سرویس (برای دکمه‌ی «کانفیگ تکی»)
+async function getServiceLink(env, cfg, userId, kind, id) {
+  if (kind === "o") {
+    const o = await env.DB.prepare("SELECT config_text FROM orders WHERE id=? AND user_id=? AND type='purchase' AND status='approved'").bind(id, userId).first();
+    return o && /^https?:\/\//i.test(o.config_text || "") ? o.config_text : null;
+  }
+  const ext = await loadExtForUser(env, cfg, userId, id);
+  const panel = ext ? await getPanel(env, ext.panel_id) : null;
+  if (!ext || !panel) return null;
+  try {
+    const found = await panelFindUser(panel, ext.username);
+    return found?.subUrl || null;
+  } catch {
+    return null;
+  }
+}
+// خوندن لینک اشتراک و جدا کردن کانفیگ‌های تکی (vless:// vmess:// ...)
+async function fetchSubConfigs(url) {
+  const r = await fetch(url, { headers: { "User-Agent": "v2rayN/6.0", Accept: "*/*" }, signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  let t = (await r.text()).trim();
+  if (!/:\/\//.test(t)) {
+    try {
+      const bin = atob(t.replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/"));
+      t = new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+    } catch {
+      // متن ساده بود
+    }
+  }
+  return t.split(/\r?\n/).map((x) => x.trim()).filter((x) => /^[a-z0-9+.-]+:\/\//i.test(x));
+}
+// فقط بررسی مالکیت (بدون تماس با پنل)
+async function ownsService(env, cfg, userId, kind, id) {
+  if (kind === "o") {
+    return !!(await env.DB.prepare("SELECT id FROM orders WHERE id=? AND user_id=? AND type='purchase' AND status='approved'").bind(id, userId).first());
+  }
+  return !!(await loadExtForUser(env, cfg, userId, id));
+}
+// صفحه‌ی جزئیات سرویس. خروجی: {text, reply_markup} یا {error}
+async function buildServiceDetail(env, userId, cfg, kind, id) {
+  const names = await loadSvcNames(env, userId);
+  let title, productLine = "", usage = null, usageErr = false, link = null, isSub = true, renewCb = null;
+  if (kind === "o") {
+    const o = await env.DB.prepare(
+      `SELECT o.*, p.name as pname FROM orders o LEFT JOIN products p ON p.id=o.product_id
+       WHERE o.id=? AND o.user_id=? AND o.type='purchase' AND o.status='approved'`
+    ).bind(id, userId).first();
+    if (!o) return { error: "این سرویس پیدا نشد." };
+    title = names[`o:${id}`] || (o.panel_id && o.panel_username ? o.panel_username : `${o.pname || "سرویس"} #${id}`);
+    productLine = `📦 محصول: ${escapeHtml(o.pname || "-")}`;
+    link = o.config_text || null;
+    isSub = /^https?:\/\//i.test(link || "");
+    if (o.panel_id) {
+      renewCb = `renew:${id}`;
+      try {
+        const panel = await getPanel(env, o.panel_id);
+        if (!panel) throw new Error("no panel");
+        usage = await panelUsage(panel, { username: o.panel_username, extra: safeJson(o.panel_extra) });
+      } catch {
+        usageErr = true;
+      }
+    }
+  } else {
+    const ext = await loadExtForUser(env, cfg, userId, id);
+    if (!ext) return { error: "این اشتراک پیدا نشد." };
+    title = names[`e:${id}`] || ext.username;
+    productLine = "🔎 اشتراک قبلی";
+    renewCb = `xpl:${ext.id}`;
+    try {
+      const panel = await getPanel(env, ext.panel_id);
+      if (!panel) throw new Error("no panel");
+      const found = await panelFindUser(panel, ext.username);
+      if (!found) throw new Error("not found");
+      usage = found;
+      link = found.subUrl || null;
+    } catch {
+      usageErr = true;
+    }
+  }
+  const lines = [`📛 <b>${escapeHtml(title)}</b>`, productLine];
+  if (usage) lines.push("", ...usageLines(usage));
+  else if (usageErr) lines.push("", "⚠️ دریافت مصرف از پنل ممکن نشد؛ کمی بعد دوباره امتحان کن.");
+  if (link) lines.push("", isSub ? "🔗 لینک اتصال (Subscription):" : "🔑 کانفیگ شما:", `<code>${escapeHtml(link)}</code>`);
+  lines.push("", "برای مدیریت از پنل زیر استفاده کن 👇");
+  const rows = [];
+  if (link && isSub) rows.push([{ text: "📋 دریافت لینک‌ها به‌صورت کانفیگ (تکی)", callback_data: `sv:cf:${kind}:${id}` }]);
+  const r2 = [];
+  if (link && cfg.qr_enabled !== false) r2.push({ text: "📲 QR Code", callback_data: `qr:${kind}:${id}` });
+  if (renewCb) r2.push({ text: "♻️ تمدید سرویس", callback_data: renewCb });
+  if (r2.length) rows.push(r2);
+  if (!cfg.menu.tutorial?.hidden) rows.push([{ text: "📚 نحوه اتصال به سرویس", callback_data: "tutorial" }]);
+  rows.push([{ text: "✏️ تغییر نام نمایشی", callback_data: `sv:rn:${kind}:${id}` }]);
+  rows.push([{ text: "🔙 برگشت به لیست", callback_data: "sv:l" }]);
+  return { text: lines.join("\n"), reply_markup: { inline_keyboard: rows } };
+}
+
+// ---------- نام دلخواه کانفیگ ----------
+// نام تا لحظه‌ی ساخت سفارش در state نگه داشته میشه و بعد توی ستون panel_username سفارش (تا قبل از ساخت سرویس خالیه) ذخیره میشه؛
+// fulfillPurchase همون رو به‌عنوان یوزرنیم پنل استفاده می‌کنه. بدون نیاز به مایگریشن.
+const CFG_NAME_RE = /^[A-Za-z0-9_]{3,20}$/;
+async function setCfgName(env, userId, name) {
+  await stateSet(env, `cname:${userId}`, JSON.stringify({ n: name || null, ts: Date.now() }));
+}
+async function peekCfgName(env, userId) {
+  const raw = await stateGet(env, `cname:${userId}`);
+  if (!raw) return null;
+  try {
+    const o = JSON.parse(raw);
+    return o.n && Date.now() - (o.ts || 0) < 30 * 60 * 1000 ? o.n : null;
+  } catch {
+    return null;
+  }
+}
+const fixedDetails = (product) =>
+  `📦 <b>${escapeHtml(product.name)}</b>\n💵 قیمت: ${fmtMoney(product.price)}\n⏳ مدت: ${product.duration_days} روز` +
+  (product.panel_id ? `\n📊 حجم: ${product.data_limit_gb > 0 ? product.data_limit_gb + " گیگ" : "نامحدود"}` : "") +
+  `\n${escapeHtml(product.description || "")}`;
+
+// مرحله‌ی انتخاب نام کانفیگ (فقط محصولات پنلی). gb/days خالی = محصول ثابت؛ پرشده = حجم دلخواه
+async function askConfigName(env, chatId, userId, product, { gb = null, days = null } = {}, msgId = null, errLine = "") {
+  const custom = days !== null && days !== undefined;
+  const base = { action: "config_name", product_id: product.id, gb, days, ts: Date.now() };
+  await setUserState(env, userId, base);
+  const head = custom
+    ? `🧮 <b>${escapeHtml(product.name)}</b>\n📊 حجم: ${trimNum(gb)} گیگ | ⏳ مدت: ${days} روز`
+    : fixedDetails(product);
+  const sent = await showStep(
+    env,
+    chatId,
+    msgId,
+    `${errLine ? errLine + "\n\n" : ""}${head}\n\n🏷 یه اسم دلخواه برای کانفیگت بفرست (فقط حروف انگلیسی، عدد و _ ، بین ۳ تا ۲۰ کاراکتر) یا دکمه‌ی «نام پیش‌فرض» رو بزن.`,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🎲 نام پیش‌فرض", callback_data: "cnm:d" }],
+          [{ text: "🔙 برگشت", callback_data: custom ? `cbd:${product.id}:${trimNum(gb)}` : `bkp:${product.id}` }],
+        ],
+      },
+    }
+  );
+  const mid = sent?.result?.message_id;
+  if (mid) await setUserState(env, userId, { ...base, mid });
+}
+// صفحه‌ی پرداخت محصول ثابت
+async function showFixedPay(env, chatId, msgId, product, name) {
+  const nameLine = product.panel_id ? `\n🏷 نام کانفیگ: ${name ? `<code>${escapeHtml(name)}</code>` : "پیش‌فرض"}` : "";
+  await showStep(
+    env,
+    chatId,
+    msgId,
+    `${fixedDetails(product)}${nameLine}\n\nروش پرداخت رو انتخاب کن:`,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "💰 پرداخت از کیف پول", callback_data: `paywallet:${product.id}` }],
+          [{ text: "💳 پرداخت کارت‌به‌کارت", callback_data: `paycard:${product.id}` }],
+          [{ text: "🔙 برگشت", callback_data: product.panel_id ? `bnm:${product.id}` : `bkp:${product.id}` }],
+        ],
+      },
+    }
+  );
+}
+// بعد از انتخاب نام (دکمه‌ی پیش‌فرض یا تایپ): رفتن به صفحه‌ی بعد
+async function finishConfigName(env, chatId, userId, st, name, msgId) {
+  const product = await env.DB.prepare("SELECT * FROM products WHERE id=? AND enabled=1 AND is_trial=0").bind(st.product_id).first();
+  if (!product) {
+    await clearUserState(env, userId);
+    await sendMessage(env, chatId, "این محصول دیگه موجود نیست.");
+    return;
+  }
+  await setCfgName(env, userId, name);
+  await clearUserState(env, userId);
+  if (st.days !== null && st.days !== undefined) await showCustomSummary(env, chatId, userId, product, st.gb, st.days, null, msgId);
+  else await showFixedPay(env, chatId, msgId, product, name);
+}
+
+async function showExtPlans(env, chatId, ext, msgId = null) {
   const { results } = await env.DB.prepare(
     "SELECT * FROM products WHERE panel_id=? AND enabled=1 AND is_trial=0 ORDER BY (custom IS NOT NULL), price"
   ).bind(ext.panel_id).all();
   if (!results.length) {
-    await sendMessage(env, chatId, "برای تمدید این اشتراک هنوز پلنی تعریف نشده؛ با پشتیبانی تماس بگیر.");
+    await showStep(env, chatId, msgId, "برای تمدید این اشتراک هنوز پلنی تعریف نشده؛ با پشتیبانی تماس بگیر.");
     return;
   }
   const rows = results.map((pr) =>
@@ -1477,42 +1868,51 @@ async function showExtPlans(env, chatId, ext) {
       ? [{ text: `🧮 ${pr.name} — از ${fmtMoney(pr.price)}`, callback_data: `xz:${ext.id}:${pr.id}` }]
       : [{ text: `${pr.name} — ${fmtMoney(pr.price)}`, callback_data: `xq:${ext.id}:${pr.id}` }]
   );
-  await sendMessage(env, chatId, `♻️ تمدید «${escapeHtml(ext.username)}» — یکی از پلن‌ها رو انتخاب کن:`, { reply_markup: { inline_keyboard: rows } });
+  await showStep(env, chatId, msgId, `♻️ تمدید «${escapeHtml(ext.username)}» — یکی از پلن‌ها رو انتخاب کن:`, { reply_markup: { inline_keyboard: rows } });
 }
 async function extProceed(env, chatId, ext, panel, found) {
   await showExtPlans(env, chatId, ext);
 }
 
 // ---------- پرسش‌های خرید حجم دلخواه ----------
-async function askCustomGb(env, chatId, userId, product, extId = null) {
+async function askCustomGb(env, chatId, userId, product, extId = null, msgId = null) {
   const c = customOf(product);
   await setUserState(env, userId, { action: "custom_gb", product_id: product.id, ext_id: extId, ts: Date.now() });
   const rows = chunk(
     pickPresets(c.min_gb, c.max_gb, NICE_GB).map((g) => ({ text: `${trimNum(g)} گیگ`, callback_data: extId ? `xg:${extId}:${product.id}:${trimNum(g)}` : `cgb:${product.id}:${trimNum(g)}` })),
     3
   );
-  await sendMessage(
+  rows.push([{ text: "🔙 برگشت", callback_data: extId ? `xpl:${extId}` : `bkp:${product.id}` }]);
+  const sent = await showStep(
     env,
     chatId,
+    msgId,
     `🧮 <b>${escapeHtml(product.name)}</b>\n${escapeHtml(product.description || "")}\n\n📊 حجم مورد نظرت رو بفرست (بین ${trimNum(c.min_gb)} تا ${trimNum(c.max_gb)} گیگ) یا یکی از گزینه‌ها رو بزن:\n💵 قیمت هر گیگ: ${fmtMoney(c.price_per_gb)}`,
     { reply_markup: { inline_keyboard: rows } }
   );
+  // آیدی پیام ذخیره میشه تا اگه کاربر عدد تایپ کرد، همین پیام پاک و مرحله‌ی بعد جایگزینش بشه
+  const mid = sent?.result?.message_id;
+  if (mid) await setUserState(env, userId, { action: "custom_gb", product_id: product.id, ext_id: extId, ts: Date.now(), mid });
 }
-async function askCustomDays(env, chatId, userId, product, gb, extId = null) {
+async function askCustomDays(env, chatId, userId, product, gb, extId = null, msgId = null) {
   const c = customOf(product);
   await setUserState(env, userId, { action: "custom_days", product_id: product.id, ext_id: extId, gb, ts: Date.now() });
   const rows = chunk(
     pickPresets(c.min_days, c.max_days, NICE_DAYS).map((d) => ({ text: `${d} روز`, callback_data: extId ? `xd:${extId}:${product.id}:${trimNum(gb)}:${d}` : `cdy:${product.id}:${trimNum(gb)}:${d}` })),
     3
   );
-  await sendMessage(
+  rows.push([{ text: "🔙 برگشت", callback_data: extId ? `xbg:${extId}:${product.id}` : `cbg:${product.id}` }]);
+  const sent = await showStep(
     env,
     chatId,
+    msgId,
     `✅ حجم: ${trimNum(gb)} گیگ\n\n⏳ مدت رو بفرست (بین ${c.min_days} تا ${c.max_days} روز) یا یکی از گزینه‌ها رو بزن:${c.price_per_day ? `\n💵 قیمت هر روز: ${fmtMoney(c.price_per_day)}` : ""}`,
     { reply_markup: { inline_keyboard: rows } }
   );
+  const mid = sent?.result?.message_id;
+  if (mid) await setUserState(env, userId, { action: "custom_days", product_id: product.id, ext_id: extId, gb, ts: Date.now(), mid });
 }
-async function showCustomSummary(env, chatId, userId, product, gb, days, extId = null) {
+async function showCustomSummary(env, chatId, userId, product, gb, days, extId = null, msgId = null) {
   const c = customOf(product);
   const price = customPrice(c, gb, days);
   await clearUserState(env, userId);
@@ -1524,17 +1924,21 @@ async function showCustomSummary(env, chatId, userId, product, gb, days, extId =
   const wCb = extId ? `xv:${extId}:${product.id}:${trimNum(gb)}:${days}` : `cpw:${product.id}:${trimNum(gb)}:${days}`;
   const cCb = extId ? `xk:${extId}:${product.id}:${trimNum(gb)}:${days}` : `cpc:${product.id}:${trimNum(gb)}:${days}`;
   const head = extId ? `♻️ تمدید «${escapeHtml(extRow.username)}»\n` : "";
+  const nm = extId ? null : await peekCfgName(env, userId);
+  const nameLine = extId ? "" : `\n🏷 نام کانفیگ: ${nm ? `<code>${escapeHtml(nm)}</code>` : "پیش‌فرض"}`;
   const tail = extId ? "\n\nهمه‌چیز ریست میشه: مصرف صفر و مدت از امروز حساب میشه (روزهای باقی‌مانده‌ی قبلی اضافه نمیشن).\nروش پرداخت رو انتخاب کن:" : "\n\nروش پرداخت رو انتخاب کن:";
   const calc = `${trimNum(gb)} × ${fmtMoney(c.price_per_gb)}${c.price_per_day ? ` + ${days} × ${fmtMoney(c.price_per_day)}` : ""}`;
-  await sendMessage(
+  await showStep(
     env,
     chatId,
-    `${head}🧮 <b>${escapeHtml(product.name)}</b>\n📊 حجم: ${trimNum(gb)} گیگ\n⏳ مدت: ${days} روز\n\n💵 قیمت نهایی: <b>${fmtMoney(price)}</b>\n(${calc})${tail}`,
+    msgId,
+    `${head}🧮 <b>${escapeHtml(product.name)}</b>\n📊 حجم: ${trimNum(gb)} گیگ\n⏳ مدت: ${days} روز${nameLine}\n\n💵 قیمت نهایی: <b>${fmtMoney(price)}</b>\n(${calc})${tail}`,
     {
       reply_markup: {
         inline_keyboard: [
           [{ text: "💰 پرداخت از کیف پول", callback_data: wCb }],
           [{ text: "💳 پرداخت کارت‌به‌کارت", callback_data: cCb }],
+          [{ text: "🔙 برگشت", callback_data: extId ? `xbd:${extId}:${product.id}:${trimNum(gb)}` : `cbn:${product.id}:${trimNum(gb)}:${days}` }],
         ],
       },
     }
@@ -1653,6 +2057,7 @@ async function handleUserStateInput(env, chatId, userId, text, st) {
         await sendMessage(env, chatId, `یه عدد بین ${trimNum(c.min_gb)} تا ${trimNum(c.max_gb)} (گیگ) بفرست. برای لغو: /cancel`);
         return;
       }
+      if (st.mid) await tgCall(env, "deleteMessage", { chat_id: chatId, message_id: st.mid });
       await askCustomDays(env, chatId, userId, product, Math.round(gb * 100) / 100, st.ext_id || null);
       return;
     }
@@ -1661,7 +2066,52 @@ async function handleUserStateInput(env, chatId, userId, text, st) {
       await sendMessage(env, chatId, `یه عدد صحیح بین ${c.min_days} تا ${c.max_days} (روز) بفرست. برای لغو: /cancel`);
       return;
     }
-    await showCustomSummary(env, chatId, userId, product, st.gb, days, st.ext_id || null);
+    if (st.mid) await tgCall(env, "deleteMessage", { chat_id: chatId, message_id: st.mid });
+    if (st.ext_id) await showCustomSummary(env, chatId, userId, product, st.gb, days, st.ext_id);
+    else await askConfigName(env, chatId, userId, product, { gb: st.gb, days });
+    return;
+  }
+  if (st.action === "svc_rename") {
+    if (Date.now() - (st.ts || 0) > 15 * 60 * 1000) {
+      await clearUserState(env, userId);
+      await sendMessage(env, chatId, "زمان این انتخاب تموم شده؛ از «سرویس‌های من» دوباره شروع کن.");
+      return;
+    }
+    const name = text.trim().replace(/\s+/g, " ");
+    if (name.length < 1 || name.length > 30) {
+      await sendMessage(env, chatId, "اسم نمایشی باید بین ۱ تا ۳۰ کاراکتر باشه. دوباره بفرست یا /cancel بزن.");
+      return;
+    }
+    const cfgR = await loadUiCfg(env);
+    if (!(await ownsService(env, cfgR, userId, st.kind, st.id))) {
+      await clearUserState(env, userId);
+      await sendMessage(env, chatId, "این سرویس پیدا نشد.");
+      return;
+    }
+    await stateSet(env, svcNameKey(userId, st.kind, st.id), name);
+    await clearUserState(env, userId);
+    const v2 = await buildServiceDetail(env, userId, cfgR, st.kind, st.id);
+    await showStep(env, chatId, st.mid || null, v2.text, { reply_markup: v2.reply_markup });
+    return;
+  }
+  if (st.action === "config_name") {
+    if (Date.now() - (st.ts || 0) > 15 * 60 * 1000) {
+      await clearUserState(env, userId);
+      await sendMessage(env, chatId, "زمان این انتخاب تموم شده. دوباره از «خرید اشتراک» شروع کن.");
+      return;
+    }
+    const name = text.trim();
+    if (!CFG_NAME_RE.test(name)) {
+      const product = await env.DB.prepare("SELECT * FROM products WHERE id=? AND enabled=1 AND is_trial=0").bind(st.product_id).first();
+      if (!product) {
+        await clearUserState(env, userId);
+        await sendMessage(env, chatId, "این محصول دیگه موجود نیست.");
+        return;
+      }
+      await askConfigName(env, chatId, userId, product, { gb: st.gb, days: st.days }, st.mid || null, "❌ اسم نامعتبره: فقط حروف انگلیسی، عدد و _ (۳ تا ۲۰ کاراکتر).");
+      return;
+    }
+    await finishConfigName(env, chatId, userId, st, name, st.mid || null);
     return;
   }
 }
@@ -1914,6 +2364,35 @@ async function handleAdminStateInput(env, chatId, adminId, text, st, message) {
     return;
   }
 
+  if (st.action === "set_welcome_text" || st.action === "set_welcome_back_text") {
+    const isBack = st.action === "set_welcome_back_text";
+    const key = isBack ? "welcome_back_text" : "welcome_text";
+    const cfg = await loadUiCfg(env);
+    if (text.toLowerCase() === "default") {
+      delete cfg[key];
+      await saveUiCfg(env, cfg);
+      await clearAdminState(env, adminId);
+      await sendMessage(env, chatId, "متن به پیش‌فرض برگشت.", adminMainMenu());
+      return;
+    }
+    if (text.length < 2 || text.length > 3500) {
+      await sendMessage(env, chatId, "متن باید بین ۲ تا ۳۵۰۰ کاراکتر باشه.");
+      return;
+    }
+    // اعتبارسنجی: متن رندرشده با اسم خود ادمین به چت ادمین فرستاده میشه؛ اگه HTML نامعتبر بود ذخیره نمیشه
+    const rendered = await renderWelcome(env, cfg, message.from, isBack ? "back" : "new", text);
+    const probe = await sendMessage(env, chatId, rendered);
+    if (!probe.ok) {
+      await sendMessage(env, chatId, `❌ متن نامعتبره (${probe.description || "خطای فرمت"}). تگ‌های HTML رو چک کن یا بدون تگ بفرست.`);
+      return;
+    }
+    cfg[key] = text;
+    await saveUiCfg(env, cfg);
+    await clearAdminState(env, adminId);
+    await sendMessage(env, chatId, "✅ ذخیره شد (بالا همونیه که کاربر می‌بینه).", adminMainMenu());
+    return;
+  }
+
   if (st.action === "set_rules_btn") {
     const cfg = await loadUiCfg(env);
     if (text.toLowerCase() === "default") {
@@ -2053,21 +2532,20 @@ async function handleAdminStateInput(env, chatId, adminId, text, st, message) {
 
   if (st.action === "broadcast") {
     await clearAdminState(env, adminId);
-    const { results } = await env.DB.prepare("SELECT id FROM users WHERE registered=1").all();
-    let success = 0, fail = 0;
-    for (const u of results) {
-      try {
-        const r = await sendMessage(env, u.id, text, mainMenuKeyboard(isAdmin(env, u.id)));
-        if (r.ok) success++; else fail++;
-      } catch { fail++; }
+    const r = await startBroadcast(env, adminId, chatId, text);
+    if (r.error) {
+      await sendMessage(env, chatId, `❌ ${r.error}`, adminMainMenu());
+      return;
     }
-    await sendMessage(env, chatId, `📢 ارسال شد.\n✅ موفق: ${success}\n❌ ناموفق: ${fail}`, adminMainMenu());
+    // سرور (Railway): کار پس‌زمینه تا آخر؛ Cloudflare: همین الان ۴۰ تا، بقیه با Cron هر دقیقه
+    if (env.kickBroadcast) env.kickBroadcast();
+    else await runBroadcastTick(env, { maxSends: 40 });
     return;
   }
 }
 
 // ---------- پرداخت از کیف پول (کسر اتمیک + برگشت پول در صورت خطا) ----------
-async function payFromWallet(env, cq, userId, { type, productId, amount, renewOf, gb = null, days = null, extId = null }) {
+async function payFromWallet(env, cq, userId, { type, productId, amount, renewOf, gb = null, days = null, extId = null, configName = null }) {
   const debit = await env.DB.prepare("UPDATE users SET wallet_balance = wallet_balance - ? WHERE id=? AND wallet_balance >= ?")
     .bind(amount, userId, amount).run();
   if (!(debit.meta && debit.meta.changes > 0)) {
@@ -2078,8 +2556,9 @@ async function payFromWallet(env, cq, userId, { type, productId, amount, renewOf
   let order;
   try {
     const ins = await env.DB.prepare(
-      "INSERT INTO orders (user_id, product_id, type, amount, status, renew_of, gb, days, ext_id, created_at) VALUES (?,?,?,?,'pending',?,?,?,?,?)"
-    ).bind(userId, productId, type, amount, renewOf, gb, days, extId, Date.now()).run();
+      "INSERT INTO orders (user_id, product_id, type, amount, status, renew_of, gb, days, ext_id, panel_username, created_at) VALUES (?,?,?,?,'pending',?,?,?,?,?,?)"
+    ).bind(userId, productId, type, amount, renewOf, gb, days, extId, configName, Date.now()).run();
+    await stateDelete(env, `cname:${userId}`);
     order = await env.DB.prepare("SELECT * FROM orders WHERE id=?").bind(ins.meta.last_row_id).first();
   } catch (e) {
     await refund();
@@ -2138,9 +2617,9 @@ async function handleCallback(env, cq) {
 
   // ---------- دکمه‌های خاموش (برای callback های قدیمی هم) ----------
   {
-    const offKey = /^(buy|buycat|buycats|paywallet|paycard|cgb|cdy|cpw|cpc)(:|$)/.test(data) ? "buy"
-      : /^(xo|xr|xp|xq|xw|xc|xz|xg|xd|xv|xk):/.test(data) ? "lookup"
-      : /^qr:/.test(data) ? "services"
+    const offKey = /^(buy|buycat|buycats|bkp|bnm|cnm|cbg|cbd|cbn|paywallet|paycard|cgb|cdy|cpw|cpc)(:|$)/.test(data) ? "buy"
+      : /^(xo|xr|xp|xq|xw|xc|xz|xg|xd|xv|xk|xpl|xbg|xbd):/.test(data) ? "lookup"
+      : /^(qr|sv):/.test(data) ? "services"
       : /^(renew|renewwallet|renewcard):/.test(data) ? "renew"
       : /^topup(custom)?(:|$)/.test(data) ? "wallet"
       : data === "tutorial" ? "tutorial" : null;
@@ -2181,6 +2660,80 @@ async function handleCallback(env, cq) {
     return;
   }
 
+  // ---------- برگشت‌ها و نام کانفیگ ----------
+  if (data.startsWith("bkp:")) {
+    const p = await env.DB.prepare("SELECT category_id FROM products WHERE id=?").bind(data.split(":")[1]).first();
+    let catId = null;
+    if (p) {
+      const cats = await listCategories(env, { onlyEnabled: false });
+      catId = p.category_id && cats.some((c) => c.id === p.category_id) ? p.category_id : 0;
+    }
+    await clearUserState(env, userId);
+    await answerCallback(env, cq.id, "");
+    const view = await buildBuyView(env, catId);
+    await showStep(env, chatId, messageId, view.text, view.reply_markup ? { reply_markup: view.reply_markup } : {});
+    return;
+  }
+  if (/^(bnm|cbg|cbd|cbn):\d+/.test(data)) {
+    const [kind, pid, gbS, daysS] = data.split(":");
+    const product = await env.DB.prepare("SELECT * FROM products WHERE id=? AND enabled=1 AND is_trial=0").bind(pid).first();
+    const c = product ? customOf(product) : null;
+    if (!product || !product.panel_id || (kind !== "bnm" && !c)) {
+      await answerCallback(env, cq.id, "این محصول دیگه موجود نیست.", true);
+      return;
+    }
+    await answerCallback(env, cq.id, "");
+    if (kind === "bnm") {
+      await askConfigName(env, chatId, userId, product, {}, messageId);
+      return;
+    }
+    if (kind === "cbg") {
+      await askCustomGb(env, chatId, userId, product, null, messageId);
+      return;
+    }
+    const gb = parseNum(gbS);
+    if (kind === "cbd") {
+      await askCustomDays(env, chatId, userId, product, gb, null, messageId);
+      return;
+    }
+    await askConfigName(env, chatId, userId, product, { gb, days: parseInt(daysS, 10) }, messageId);
+    return;
+  }
+  if (data === "cnm:d") {
+    const raw = await getUserState(env, userId);
+    const st = raw ? JSON.parse(raw) : null;
+    if (!st || st.action !== "config_name" || Date.now() - (st.ts || 0) > 15 * 60 * 1000) {
+      await answerCallback(env, cq.id, "زمان این انتخاب تموم شده؛ دوباره از خرید شروع کن.", true);
+      return;
+    }
+    await answerCallback(env, cq.id, "");
+    await finishConfigName(env, chatId, userId, st, null, messageId);
+    return;
+  }
+  if (/^(xpl|xbg|xbd):\d+/.test(data)) {
+    const [kind, extIdS, pidS, gbS] = data.split(":");
+    const cfgX = await loadUiCfg(env);
+    const ext = await loadExtForUser(env, cfgX, userId, extIdS);
+    if (!ext) {
+      await answerCallback(env, cq.id, "این گزینه معتبر نیست؛ دوباره از اول شروع کن.", true);
+      return;
+    }
+    await answerCallback(env, cq.id, "");
+    if (kind === "xpl") {
+      await clearUserState(env, userId);
+      await showExtPlans(env, chatId, ext, messageId);
+      return;
+    }
+    const product = await env.DB.prepare("SELECT * FROM products WHERE id=? AND panel_id=? AND enabled=1 AND is_trial=0").bind(pidS, ext.panel_id).first();
+    if (!product || !customOf(product)) {
+      await answerCallback(env, cq.id, "این گزینه معتبر نیست؛ دوباره از اول شروع کن.", true);
+      return;
+    }
+    if (kind === "xbg") await askCustomGb(env, chatId, userId, product, ext.id, messageId);
+    else await askCustomDays(env, chatId, userId, product, parseNum(gbS), ext.id, messageId);
+    return;
+  }
+
   if (data === "buycats" || data.startsWith("buycat:")) {
     const view = await buildBuyView(env, data === "buycats" ? null : parseInt(data.split(":")[1], 10) || 0);
     await answerCallback(env, cq.id, "");
@@ -2201,7 +2754,7 @@ async function handleCallback(env, cq) {
         return;
       }
       await answerCallback(env, cq.id, "");
-      await askCustomGb(env, chatId, userId, product);
+      await askCustomGb(env, chatId, userId, product, null, messageId);
       return;
     }
     if (!product.panel_id) {
@@ -2212,20 +2765,13 @@ async function handleCallback(env, cq) {
       }
     }
     await answerCallback(env, cq.id, "");
-    const gbLine = product.panel_id ? `\n📊 حجم: ${product.data_limit_gb > 0 ? product.data_limit_gb + " گیگ" : "نامحدود"}` : "";
-    await sendMessage(
-      env,
-      chatId,
-      `📦 <b>${escapeHtml(product.name)}</b>\n💵 قیمت: ${fmtMoney(product.price)}\n⏳ مدت: ${product.duration_days} روز${gbLine}\n${escapeHtml(product.description || "")}\n\nروش پرداخت رو انتخاب کن:`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "💰 پرداخت از کیف پول", callback_data: `paywallet:${productId}` }],
-            [{ text: "💳 پرداخت کارت‌به‌کارت", callback_data: `paycard:${productId}` }],
-          ],
-        },
-      }
-    );
+    await stateDelete(env, `cname:${userId}`);
+    if (product.panel_id) {
+      await askConfigName(env, chatId, userId, product, {}, messageId);
+      return;
+    }
+    await clearUserState(env, userId);
+    await showFixedPay(env, chatId, messageId, product, null);
     return;
   }
 
@@ -2240,7 +2786,7 @@ async function handleCallback(env, cq) {
       await answerCallback(env, cq.id, "این محصول عوض شده؛ دوباره از «خرید اشتراک» شروع کن.", true);
       return;
     }
-    await payFromWallet(env, cq, userId, { type: "purchase", productId: product.id, amount: product.price, renewOf: null });
+    await payFromWallet(env, cq, userId, { type: "purchase", productId: product.id, amount: product.price, renewOf: null, configName: product.panel_id ? await peekCfgName(env, userId) : null });
     return;
   }
 
@@ -2256,10 +2802,102 @@ async function handleCallback(env, cq) {
       return;
     }
     const res = await env.DB.prepare(
-      "INSERT INTO orders (user_id, product_id, type, amount, status, created_at) VALUES (?,?,'purchase',?,'awaiting_receipt',?)"
-    ).bind(userId, productId, product.price, Date.now()).run();
+      "INSERT INTO orders (user_id, product_id, type, amount, status, panel_username, created_at) VALUES (?,?,'purchase',?,'awaiting_receipt',?,?)"
+    ).bind(userId, productId, product.price, product.panel_id ? await peekCfgName(env, userId) : null, Date.now()).run();
+    await stateDelete(env, `cname:${userId}`);
     await answerCallback(env, cq.id, "");
     await startCardPayment(env, chatId, userId, res.meta.last_row_id, product.price);
+    return;
+  }
+
+  // ---------- سرویس‌های من: لیست / جزئیات / نام نمایشی / کانفیگ تکی ----------
+  if (/^sv:(l|[oe]:\d+|cf:[oe]:\d+|rn:[oe]:\d+|rd:[oe]:\d+)$/.test(data)) {
+    const parts2 = data.split(":");
+    const cfgS = await loadUiCfg(env);
+    const sub = parts2[1];
+    if (sub === "l") {
+      await clearUserState(env, userId);
+      await answerCallback(env, cq.id, "");
+      const v = await buildServiceList(env, userId, cfgS);
+      await showStep(env, chatId, messageId, v.text, v.reply_markup ? { reply_markup: v.reply_markup } : {});
+      return;
+    }
+    const showDetail = async (kind, id) => {
+      const v = await buildServiceDetail(env, userId, cfgS, kind, id);
+      if (v.error) {
+        await answerCallback(env, cq.id, v.error, true);
+        return;
+      }
+      await answerCallback(env, cq.id, "");
+      await showStep(env, chatId, messageId, v.text, { reply_markup: v.reply_markup });
+    };
+    if (sub === "o" || sub === "e") {
+      await clearUserState(env, userId);
+      await showDetail(sub, parts2[2]);
+      return;
+    }
+    const kind = parts2[2];
+    const id = parts2[3];
+    if (sub === "cf") {
+      const link = await getServiceLink(env, cfgS, userId, kind, id);
+      if (!link) {
+        await answerCallback(env, cq.id, "دریافت لینک ممکن نشد؛ کمی بعد دوباره امتحان کن.", true);
+        return;
+      }
+      await answerCallback(env, cq.id, "⏳ در حال دریافت...");
+      let links = [];
+      try {
+        links = await fetchSubConfigs(link);
+      } catch {
+        // پایین پیام خطا میدیم
+      }
+      if (!links.length) {
+        await sendMessage(env, chatId, "دریافت کانفیگ‌ها از لینک اشتراک ممکن نشد؛ از خود لینک اشتراک استفاده کن.");
+        return;
+      }
+      const shown = links.slice(0, 20);
+      let chunkTxt = "";
+      const out = [];
+      shown.forEach((l, i) => {
+        const block = `${i + 1}) <code>${escapeHtml(l)}</code>`;
+        if (chunkTxt && chunkTxt.length + block.length > 3500) {
+          out.push(chunkTxt);
+          chunkTxt = "";
+        }
+        chunkTxt += (chunkTxt ? "\n\n" : "") + block;
+      });
+      if (chunkTxt) out.push(chunkTxt);
+      await sendMessage(env, chatId, `📋 کانفیگ‌های تکی این سرویس (${shown.length} عدد)؛ هر کدوم رو لمس کن تا کپی بشه:`);
+      for (const t of out) await sendMessage(env, chatId, t);
+      return;
+    }
+    // rn / rd: اول مطمئن میشیم سرویس مال همین کاربره
+    if (!(await ownsService(env, cfgS, userId, kind, id))) {
+      await answerCallback(env, cq.id, "این سرویس پیدا نشد.", true);
+      return;
+    }
+    if (sub === "rd") {
+      await stateDelete(env, svcNameKey(userId, kind, id));
+      await clearUserState(env, userId);
+      await showDetail(kind, id);
+      return;
+    }
+    await setUserState(env, userId, { action: "svc_rename", kind, id, mid: messageId, ts: Date.now() });
+    await answerCallback(env, cq.id, "");
+    await showStep(
+      env,
+      chatId,
+      messageId,
+      "✏️ اسم نمایشی جدید این سرویس رو بفرست (حداکثر ۳۰ کاراکتر، فارسی هم مجازه).\n\nاین اسم فقط توی ربات نشون داده میشه و روی خود کانفیگ تاثیری نداره.",
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "♻️ برگشت به نام پیش‌فرض", callback_data: `sv:rd:${kind}:${id}` }],
+            [{ text: "🔙 برگشت", callback_data: `sv:${kind}:${id}` }],
+          ],
+        },
+      }
+    );
     return;
   }
 
@@ -2353,15 +2991,17 @@ async function handleCallback(env, cq) {
     }
     if (kind === "xq") {
       await answerCallback(env, cq.id, "");
-      await sendMessage(
+      await showStep(
         env,
         chatId,
+        messageId,
         `♻️ تمدید «${escapeHtml(ext.username)}»\n📦 ${escapeHtml(product.name)}\n💵 مبلغ: ${fmtMoney(product.price)}\n⏳ ${product.duration_days} روز | 📊 ${product.data_limit_gb > 0 ? trimNum(product.data_limit_gb) + " گیگ" : "نامحدود"}\n\nهمه‌چیز ریست میشه: مصرف صفر و مدت از امروز حساب میشه (روزهای باقی‌مانده‌ی قبلی اضافه نمیشن).\nروش پرداخت رو انتخاب کن:`,
         {
           reply_markup: {
             inline_keyboard: [
               [{ text: "💰 پرداخت از کیف پول", callback_data: `xw:${ext.id}:${product.id}` }],
               [{ text: "💳 پرداخت کارت‌به‌کارت", callback_data: `xc:${ext.id}:${product.id}` }],
+              [{ text: "🔙 برگشت", callback_data: `xpl:${ext.id}` }],
             ],
           },
         }
@@ -2397,7 +3037,7 @@ async function handleCallback(env, cq) {
     }
     if (kind === "xz") {
       await answerCallback(env, cq.id, "");
-      await askCustomGb(env, chatId, userId, product, ext.id);
+      await askCustomGb(env, chatId, userId, product, ext.id, messageId);
       return;
     }
     const gb = parseNum(gbS);
@@ -2407,7 +3047,7 @@ async function handleCallback(env, cq) {
         return;
       }
       await answerCallback(env, cq.id, "");
-      await askCustomDays(env, chatId, userId, product, gb, ext.id);
+      await askCustomDays(env, chatId, userId, product, gb, ext.id, messageId);
       return;
     }
     const days = parseInt(daysS, 10);
@@ -2417,7 +3057,7 @@ async function handleCallback(env, cq) {
     }
     if (kind === "xd") {
       await answerCallback(env, cq.id, "");
-      await showCustomSummary(env, chatId, userId, product, gb, days, ext.id);
+      await showCustomSummary(env, chatId, userId, product, gb, days, ext.id, messageId);
       return;
     }
     const price = customPrice(c, gb, days); // قیمت همیشه در لحظه‌ی پرداخت دوباره حساب میشه
@@ -2449,7 +3089,7 @@ async function handleCallback(env, cq) {
         return;
       }
       await answerCallback(env, cq.id, "");
-      await askCustomDays(env, chatId, userId, product, gb);
+      await askCustomDays(env, chatId, userId, product, gb, null, messageId);
       return;
     }
     const days = parseInt(daysS, 10);
@@ -2459,17 +3099,18 @@ async function handleCallback(env, cq) {
     }
     if (kind === "cdy") {
       await answerCallback(env, cq.id, "");
-      await showCustomSummary(env, chatId, userId, product, gb, days);
+      await askConfigName(env, chatId, userId, product, { gb, days }, messageId);
       return;
     }
     const price = customPrice(c, gb, days); // قیمت همیشه در لحظه‌ی پرداخت دوباره حساب میشه
     if (kind === "cpw") {
-      await payFromWallet(env, cq, userId, { type: "purchase", productId: product.id, amount: price, renewOf: null, gb, days });
+      await payFromWallet(env, cq, userId, { type: "purchase", productId: product.id, amount: price, renewOf: null, gb, days, configName: await peekCfgName(env, userId) });
       return;
     }
     const res = await env.DB.prepare(
-      "INSERT INTO orders (user_id, product_id, type, amount, status, gb, days, created_at) VALUES (?,?,'purchase',?,'awaiting_receipt',?,?,?)"
-    ).bind(userId, product.id, price, gb, days, Date.now()).run();
+      "INSERT INTO orders (user_id, product_id, type, amount, status, gb, days, panel_username, created_at) VALUES (?,?,'purchase',?,'awaiting_receipt',?,?,?,?)"
+    ).bind(userId, product.id, price, gb, days, await peekCfgName(env, userId), Date.now()).run();
+    await stateDelete(env, `cname:${userId}`);
     await answerCallback(env, cq.id, "");
     await startCardPayment(env, chatId, userId, res.meta.last_row_id, price);
     return;
@@ -2583,6 +3224,14 @@ async function handleAdminCallback(env, cq, chatId, messageId, adminId, data) {
 
   if (action === "main") {
     await editMessageText(env, chatId, messageId, "پنل مدیریت:", adminMainMenu());
+    return;
+  }
+
+  // ---- بکاپ دستی ----
+  if (action === "backup") {
+    await answerCallback(env, cq.id, "⏳ در حال ساخت بکاپ...");
+    const r = await sendBackupToLog(env, { auto: false });
+    await sendMessage(env, chatId, r.ok ? "✅ بکاپ ساخته و ارسال شد." : `❌ بکاپ ناموفق بود: ${escapeHtml(r.error || "")}`);
     return;
   }
 
@@ -3212,6 +3861,51 @@ async function handleAdminCallback(env, cq, chatId, messageId, adminId, data) {
     return;
   }
 
+  // ---- متن خوشامدگویی ----
+  if (action === "welcome") {
+    await editMessageText(
+      env, chatId, messageId,
+      "👋 <b>متن خوشامدگویی</b>\n\n" +
+        "• <b>کاربر جدید</b>: بعد از ثبت‌نام (اولین ورود) نمایش داده میشه.\n" +
+        "• <b>کاربر قبلی</b>: وقتی دوباره /start میزنه.\n\n" +
+        "متغیرهای قابل استفاده در متن:\n" +
+        "<code>{name}</code> اسم کاربر\n" +
+        "<code>{username}</code> یوزرنیم (@...)\n" +
+        "<code>{id}</code> آیدی عددی\n" +
+        "<code>{bot}</code> اسم ربات\n\n" +
+        "فرمت HTML مثل &lt;b&gt;پررنگ&lt;/b&gt; مجازه.",
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "👁 پیش‌نمایش (کاربر جدید)", callback_data: "adm:welcome_prev:new" }],
+            [{ text: "✏️ ویرایش خوشامد کاربر جدید", callback_data: "adm:welcome_edit:new" }],
+            [{ text: "👁 پیش‌نمایش (کاربر قبلی)", callback_data: "adm:welcome_prev:back" }],
+            [{ text: "✏️ ویرایش خوشامد کاربر قبلی", callback_data: "adm:welcome_edit:back" }],
+            [{ text: "🔙 بازگشت", callback_data: "adm:main" }],
+          ],
+        },
+      }
+    );
+    return;
+  }
+  if (action === "welcome_prev") {
+    await answerCallback(env, cq.id, "");
+    const kind = parts[2] === "back" ? "back" : "new";
+    const txt = await renderWelcome(env, await loadUiCfg(env), cq.from, kind);
+    await sendMessage(env, chatId, txt, mainMenuKeyboard(true));
+    return;
+  }
+  if (action === "welcome_edit") {
+    const kind = parts[2] === "back" ? "back" : "new";
+    await setAdminState(env, adminId, { action: kind === "back" ? "set_welcome_back_text" : "set_welcome_text" });
+    await answerCallback(env, cq.id, "");
+    await sendMessage(
+      env, chatId,
+      "متن جدید رو بفرست.\nمتغیرها: {name} {username} {id} {bot}\nمثال: سلام {name} عزیز 🌹 به {bot} خوش اومدی!\n\nبرای برگشت به پیش‌فرض بنویس: default\nبرای لغو: /cancel"
+    );
+    return;
+  }
+
   // ---- قوانین ----
   if (action === "rules") {
     const cfg = await loadUiCfg(env);
@@ -3444,6 +4138,11 @@ async function handleAdminCallback(env, cq, chatId, messageId, adminId, data) {
     );
     return;
   }
+  if (action === "bcstop") {
+    const stopped = await stopBroadcast(env);
+    await answerCallback(env, cq.id, stopped ? "⛔ متوقف شد" : "ارسالی در جریان نیست", !stopped);
+    return;
+  }
   if (action === "broadcast") {
     await setAdminState(env, adminId, { action: "broadcast" });
     await answerCallback(env, cq.id, "");
@@ -3485,53 +4184,29 @@ async function handleChatMemberUpdate(env, cm) {
   await logEvent(env, "users", `🚪 <b>خروج از کانال/گروه اجباری</b>\n${await logUserTag(env, user.id)}\n📣 ${escapeHtml(chanLabel)}`);
 }
 
-// ---------- Worker entry ----------
 // توابع داخلی که پنل وب ازشون استفاده می‌کنه (بدون وابستگی چرخشی)
 export const internals = {
-  sendMessage, tgCall, rawCall, tgUpload, escapeHtml, fmtMoney, isAdmin, reasonText,
-  getSetting, setSetting, loadUiCfg, saveUiCfg, getLogCfg, saveLogCfg, logEvent, getUser,
-  fulfillOrder, ensureCatSchema, getPanel, defaultWheelPrizes, getWheelPrizes,
-  MENU_ITEMS, LOG_TOPICS, DEFAULT_RULES_TEXT, DEFAULT_RULES_BTN, VALID_STYLES, mainMenuKeyboard,
-  logUserTag, PANEL_TYPES, panelTest, isIpHost, hydratePanel, clearPanelCache,
+  sendMessage, rawCall, escapeHtml, fmtMoney, isAdmin, reasonText,
+  getSetting, setSetting, loadUiCfg, saveUiCfg, getLogCfg, saveLogCfg, logEvent, getUser, logUserTag,
+  fulfillOrder, ensureCatSchema, getPanel, getWheelPrizes, mainMenuKeyboard, clearPanelCache,
+  MENU_ITEMS, LOG_TOPICS, DEFAULT_RULES_TEXT, DEFAULT_RULES_BTN, DEFAULT_WELCOME_TEXT, DEFAULT_WELCOME_BACK_TEXT, VALID_STYLES,
+  PANEL_TYPES, panelTest, isIpHost,
+  startBroadcast, stopBroadcast, runBroadcastTick, stateGet, stateDelete,
+  dumpDatabaseSql, gzipText, sendBackupToLog,
 };
 
-async function handleWebhook(request, env) {
-  let update;
-  try {
-    update = await request.json();
-  } catch {
-    return new Response("bad request", { status: 400 });
-  }
-  await processUpdate(env, update);
-  return new Response("ok");
-}
-
-// یک آپدیت تلگرام رو پردازش می‌کنه (روی Railway هم مستقیم صدا زده میشه)
-export async function processUpdate(env, update) {
-  try {
-    if (update.message) {
-      await handleMessage(env, update.message);
-    } else if (update.callback_query) {
-      await handleCallback(env, update.callback_query);
-    } else if (update.chat_member) {
-      await handleChatMemberUpdate(env, update.chat_member);
-    }
-  } catch (err) {
-    console.error("handler error", err);
-    const from = update.message?.from || update.callback_query?.from;
-    if (from && isAdmin(env, from.id)) {
-      const cid = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
-      if (cid) await sendMessage(env, cid, `⚠️ خطا:\n<code>${escapeHtml(String(err?.message || err)).slice(0, 500)}</code>`).catch(() => {});
-    }
-    await logEvent(
-      env,
-      "errors",
-      `🔥 <b>خطای ربات</b>${from ? `\n👤 <code>${from.id}</code>` : ""}${update.callback_query?.data ? `\n🔘 <code>${escapeHtml(update.callback_query.data)}</code>` : ""}\n<code>${escapeHtml(String(err?.message || err)).slice(0, 600)}</code>`
-    );
-  }
-}
-
+// ---------- Worker entry ----------
 export default {
+  // Cloudflare: Cron Trigger (wrangler.toml)  |  Railway: تایمر server.js هر شب ساعت ۰۰:۰۰
+  async scheduled(event, env) {
+    // Cron هر دقیقه / تایمر سرور = ادامه‌ی پیام همگانی؛ بقیه = بکاپ شبانه
+    if (event.cron === "* * * * *") return runBroadcastTick(env, { maxSends: 40 });
+    if (event.cron === "broadcast") return runBroadcastTick(env, { unlimited: true });
+    if (event.cron === "web-clean") return runPanelCleanup(env);
+    await runPanelCleanup(env).catch(() => {}); // پاکسازی توکن‌های ورود پنل (روزی یک‌بار)
+    return sendBackupToLog(env, { auto: true });
+  },
+
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     setOrigin(env, url.origin);
@@ -3540,22 +4215,44 @@ export default {
       return new Response("ok");
     }
 
-    if (request.method === "POST" && env.WEBHOOK_SECRET && url.pathname === `/webhook/${env.WEBHOOK_SECRET}`) {
-      // روی Railway آپدیت‌ها از صف بهینه‌ساز رد میشن (env.WEBHOOK_HOOK)
-      if (typeof env.WEBHOOK_HOOK === "function") return env.WEBHOOK_HOOK(request, (u) => processUpdate(env, u));
-      return handleWebhook(request, env);
+    if (request.method === "POST" && url.pathname === `/webhook/${env.WEBHOOK_SECRET}`) {
+      let update;
+      try {
+        update = await request.json();
+      } catch {
+        return new Response("bad request", { status: 400 });
+      }
+
+      try {
+        if (update.message) {
+          await handleMessage(env, update.message);
+        } else if (update.callback_query) {
+          await handleCallback(env, update.callback_query);
+        } else if (update.chat_member) {
+          await handleChatMemberUpdate(env, update.chat_member);
+        }
+      } catch (err) {
+        console.error("handler error", err);
+        const from = update.message?.from || update.callback_query?.from;
+        if (from && isAdmin(env, from.id)) {
+          const cid = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
+          if (cid) await sendMessage(env, cid, `⚠️ خطا:\n<code>${escapeHtml(String(err?.message || err)).slice(0, 500)}</code>`).catch(() => {});
+        }
+        await logEvent(
+          env,
+          "errors",
+          `🔥 <b>خطای ربات</b>${from ? `\n👤 <code>${from.id}</code>` : ""}${update.callback_query?.data ? `\n🔘 <code>${escapeHtml(update.callback_query.data)}</code>` : ""}\n<code>${escapeHtml(String(err?.message || err)).slice(0, 600)}</code>`
+        );
+      }
+      return new Response("ok");
     }
 
-    if (url.pathname === "/" ) return Response.redirect(`${url.origin}/panel`, 302);
+    // ---------- پنل وب ----------
+    if (url.pathname === "/") return Response.redirect(`${url.origin}/panel`, 302);
     if (url.pathname === "/panel" || url.pathname.startsWith("/panel/") || url.pathname.startsWith("/api/")) {
       return handleWeb(request, env, ctx, internals);
     }
 
     return new Response("not found", { status: 404 });
-  },
-
-  // Cron Trigger: بکاپ خودکار روی تلگرام (اگه از پنل روشن شده باشه) + پاکسازی
-  async scheduled(event, env, ctx) {
-    ctx.waitUntil(runScheduled(env, internals));
   },
 };
