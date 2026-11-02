@@ -46,7 +46,9 @@ export function restoreSql(sqlite, sqlText, schemaSql) {
           const common = srcCols.filter((c) => dst.includes(c));
           if (!common.length) continue;
           const cols = common.map(q).join(",");
-          const info = sqlite.prepare(`INSERT OR REPLACE INTO main.${q(t)} (${cols}) SELECT ${cols} FROM src.${q(t)}`).run();
+          // تنظیمات نصب‌کننده (توکن/ادمین/رمز) هیچ‌وقت با بازیابی جابه‌جا نمیشن؛ وگرنه دامپ یک سرویس دیگه، وب‌هوک این یکی رو خراب می‌کنه
+        const where = t === "settings" ? "WHERE key NOT IN ('install_cfg','install_pending')" : "";
+        const info = sqlite.prepare(`INSERT OR REPLACE INTO main.${q(t)} (${cols}) SELECT ${cols} FROM src.${q(t)} ${where}`).run();
           result[t] = Number(info.changes);
         }
         sqlite.exec("COMMIT");

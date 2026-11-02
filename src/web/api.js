@@ -697,7 +697,12 @@ R("POST", "/api/restore", async ({ env, body, I }) => {
   if (!cols.length) return err("ستون‌های جدول با دیتابیس نمیخونه");
   const stmts = [];
   if (b.first && b.mode !== "merge") stmts.push(env.DB.prepare(`DELETE FROM ${t} ${tFilter(t)}`));
-  const rows = (Array.isArray(b.rows) ? b.rows : []).slice(0, 100);
+  let rows = (Array.isArray(b.rows) ? b.rows : []).slice(0, 100);
+  if (t === "settings") {
+    // کلیدهای نصب‌کننده هیچ‌وقت از فایل بکاپ نوشته نمیشن
+    const ki = cols.find(([c]) => c === "key")?.[1];
+    if (ki !== undefined) rows = rows.filter((r) => !String(r[ki] ?? "").startsWith("install_"));
+  }
   const sql = `INSERT OR REPLACE INTO ${t} (${cols.map(([c]) => c).join(",")}) VALUES (${cols.map(() => "?").join(",")})`;
   for (const r of rows) stmts.push(env.DB.prepare(sql).bind(...cols.map(([, i]) => (r[i] === undefined ? null : r[i]))));
   if (stmts.length) await env.DB.batch(stmts);
