@@ -10,6 +10,7 @@ import { restoreSql, toSqlText } from "./src/restore.js";
 import { makeKV } from "./src/kv-sqlite.js";
 import { installFetchOptimizer, enqueueUpdate, ostats } from "./src/node-optimizer.js";
 import { invalidateSettings } from "./src/web/optimizer.js";
+import { resolveEnv, isInstalled, invalidateInstallCfg } from "./src/web/install.js";
 import { Readable } from "node:stream";
 import os from "node:os";
 
@@ -19,18 +20,16 @@ const startedAt = Date.now();
 installFetchOptimizer(); // صف نرخ تلگرام + تلاش مجدد روی 429 + ادغام GET های هم‌زمان + تایم‌اوت
 
 // ---------- تنظیمات ----------
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const ADMIN_IDS = process.env.ADMIN_IDS;
-if (!BOT_TOKEN || !ADMIN_IDS) {
-  console.error("❌ متغیرهای BOT_TOKEN و ADMIN_IDS باید ست بشن.");
-  process.exit(1);
-}
+// BOT_TOKEN / ADMIN_IDS اختیاری‌ان: اگه نباشن، سرور در «حالت نصب» بالا میاد و ویزارد /install ازشون می‌پرسه
+let BOT_TOKEN = process.env.BOT_TOKEN;
+let ADMIN_IDS = process.env.ADMIN_IDS;
 // آدرس وبهوک تصادفی ولی ثابت (اگه WEBHOOK_SECRET ندی، از روی توکن ساخته میشه)
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || crypto.createHash("sha256").update(BOT_TOKEN).digest("hex").slice(0, 32);
+let WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || (BOT_TOKEN ? crypto.createHash("sha256").update(BOT_TOKEN).digest("hex").slice(0, 32) : "");
 const PORT = parseInt(process.env.PORT || "3000", 10);
-const publicBase = process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : null);
+let publicBase = process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : null);
 // webhook | polling | standby (فقط سرور HTTP؛ وبهوک ست نمیشه و آپدیت نمی‌گیره — برای مرحله‌ی انتقال دیتابیس)
-const MODE = (process.env.BOT_MODE || (publicBase ? "webhook" : "polling")).toLowerCase();
+let MODE = (process.env.BOT_MODE || (publicBase ? "webhook" : "polling")).toLowerCase();
+const MODE_FORCED = !!process.env.BOT_MODE;
 const BACKUP_TZ = process.env.BACKUP_TZ || "Asia/Tehran";
 const BACKUP_HOUR = parseInt(process.env.BACKUP_HOUR ?? "0", 10);
 const ALLOWED = ["message", "callback_query", "chat_member"];
@@ -88,9 +87,41 @@ const env = {
   },
 };
 
+// ---------- حالت نصب: متغیرهای ذخیره‌شده توسط ویزارد رو می‌خونه و کد نصب رو آماده می‌کنه ----------
+await resolveEnv(env);
+BOT_TOKEN = env.BOT_TOKEN;
+ADMIN_IDS = env.ADMIN_IDS;
+WEBHOOK_SECRET = env.WEBHOOK_SECRET || WEBHOOK_SECRET;
+env.WEBHOOK_SECRET = WEBHOOK_SECRET;
+if (!isInstalled(env)) {
+  if (!String(env.INSTALL_CODE || "").trim() || String(env.INSTALL_CODE).length < 6) {
+    env.INSTALL_CODE = crypto.randomBytes(5).toString("hex"); // ۱۰ حرف
+    env.INSTALL_CODE_AUTO = true;
+  }
+  log("════════════════════════════════════════");
+  log("🛠  ربات هنوز نصب نشده. آدرس سرور + /install رو توی مرورگر باز کن.");
+  log(`🔑 INSTALL CODE: ${env.INSTALL_CODE}`);
+  log("════════════════════════════════════════");
+}
+// بعد از پایان ویزارد: سرویس‌ها (وبهوک/polling، بکاپ شبانه، پیام همگانی) رو راه می‌اندازه
+env.onInstalled = async (cfg, origin) => {
+  Object.assign(env, { BOT_TOKEN: cfg.BOT_TOKEN, ADMIN_IDS: cfg.ADMIN_IDS, WEBHOOK_SECRET: cfg.WEBHOOK_SECRET, PANEL_PASSWORD_HASH: cfg.PANEL_PASSWORD_HASH });
+  env.__fromDb = ["BOT_TOKEN", "ADMIN_IDS", "WEBHOOK_SECRET", "PANEL_PASSWORD_HASH"];
+  BOT_TOKEN = cfg.BOT_TOKEN;
+  ADMIN_IDS = cfg.ADMIN_IDS;
+  WEBHOOK_SECRET = cfg.WEBHOOK_SECRET;
+  if (origin.startsWith("https://") && !publicBase) publicBase = origin;
+  if (!MODE_FORCED) MODE = publicBase ? "webhook" : "polling";
+  env.PUBLIC_URL = publicBase || "";
+  env.BOT_MODE = MODE;
+  invalidateInstallCfg();
+  log(`✅ نصب از طریق ویزارد کامل شد (حالت: ${MODE})`);
+  startServices();
+};
+
 // ---------- هندل آپدیت‌ها (همون مسیر وبهوک Worker) ----------
 async function handleUpdate(update) {
-  const req = new Request(`http://internal/webhook/${WEBHOOK_SECRET}`, {
+  const req = new Request(`http://internal/webhook/${env.WEBHOOK_SECRET}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(update),
@@ -108,7 +139,7 @@ const server = http.createServer(async (req, res) => {
     for (const [k, v] of Object.entries(req.headers)) if (v !== undefined) headers.set(k, Array.isArray(v) ? v.join(", ") : v);
     const pathname = req.url.split("?")[0];
     // بازیابی دیتابیس: POST /restore/<WEBHOOK_SECRET> با بدنه‌ی فایل SQL (یا .gz)
-    if (req.method === "POST" && pathname === `/restore/${WEBHOOK_SECRET}`) {
+    if (req.method === "POST" && WEBHOOK_SECRET && pathname === `/restore/${WEBHOOK_SECRET}`) {
       try {
         const result = restoreSql(sqlite, toSqlText(Buffer.concat(chunks)), SCHEMA_SQL);
         await invalidateSettings(env); // کش تنظیمات بعد از بازیابی باطل میشه
@@ -123,7 +154,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     // آپدیت تلگرام: فوراً 200 + پردازش داخل صف (حذف تکراری‌ها، ترتیب هر کاربر، سقف هم‌زمانی)
-    if (req.method === "POST" && pathname === `/webhook/${WEBHOOK_SECRET}`) {
+    if (req.method === "POST" && isInstalled(env) && pathname === `/webhook/${WEBHOOK_SECRET}`) {
       reqCount.webhook++;
       try {
         enqueueUpdate(JSON.parse(Buffer.concat(chunks).toString("utf8")), handleUpdate);
@@ -161,7 +192,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, "0.0.0.0", () => log(`🌐 سرور روی پورت ${PORT} بالا اومد (حالت: ${MODE})`));
 
 const tg = async (method, payload) => {
-  const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${method}`, {
+  const r = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload || {}),
@@ -171,7 +202,7 @@ const tg = async (method, payload) => {
 
 // ---------- وبهوک یا Long Polling ----------
 async function startWebhook() {
-  const url = `${publicBase}/webhook/${WEBHOOK_SECRET}`;
+  const url = `${publicBase}/webhook/${env.WEBHOOK_SECRET}`;
   const r = await tg("setWebhook", { url, allowed_updates: ALLOWED });
   log(r.ok ? "✅ وبهوک ست شد" : `❌ ست‌کردن وبهوک ناموفق: ${r.description}`);
 }
@@ -193,17 +224,7 @@ async function startPolling() {
     }
   }
 }
-if (MODE === "webhook") {
-  if (!publicBase) {
-    console.error("❌ حالت webhook نیاز به PUBLIC_URL یا دامنه‌ی عمومی Railway داره.");
-    process.exit(1);
-  }
-  startWebhook().catch((e) => console.error(e));
-} else if (MODE === "standby") {
-  log("⏸ حالت standby: وبهوک ست نشد و آپدیتی دریافت نمیشه. بعد از بازیابی دیتابیس، BOT_MODE رو حذف کن یا webhook بذار.");
-} else {
-  startPolling().catch((e) => console.error(e));
-}
+// (شروع وبهوک/polling داخل startServices() پایین فایل انجام میشه)
 
 // ---------- بکاپ شبانه (هر شب ساعت BACKUP_HOUR به وقت BACKUP_TZ؛ پیش‌فرض ۰۰:۰۰ تهران) ----------
 function nowInTz() {
@@ -260,12 +281,30 @@ async function broadcastLoop() {
 env.kickBroadcast = () => {
   broadcastLoop();
 };
-if (MODE !== "standby") broadcastLoop(); // اگه کاری نصفه مونده بود ادامه میده
 
-if (MODE !== "standby") {
-  setInterval(() => backupTick().catch(() => {}), 30 * 1000);
-  log(`⏰ بکاپ شبانه: هر شب ساعت ${String(BACKUP_HOUR).padStart(2, "0")}:00 (${BACKUP_TZ})`);
+// ---------- راه‌اندازی سرویس‌های ربات (فقط بعد از نصب؛ یک‌بار) ----------
+let servicesStarted = false;
+function startServices() {
+  if (servicesStarted || !isInstalled(env)) return;
+  servicesStarted = true;
+  if (MODE === "webhook") {
+    if (!publicBase) {
+      console.error("❌ حالت webhook نیاز به PUBLIC_URL یا دامنه‌ی عمومی Railway داره.");
+      process.exit(1);
+    }
+    startWebhook().catch((e) => console.error(e));
+  } else if (MODE === "standby") {
+    log("⏸ حالت standby: وبهوک ست نشد و آپدیتی دریافت نمیشه. بعد از بازیابی دیتابیس، BOT_MODE رو حذف کن یا webhook بذار.");
+  } else {
+    startPolling().catch((e) => console.error(e));
+  }
+  if (MODE !== "standby") {
+    broadcastLoop(); // اگه کاری نصفه مونده بود ادامه میده
+    setInterval(() => backupTick().catch(() => {}), 30 * 1000);
+    log(`⏰ بکاپ شبانه: هر شب ساعت ${String(BACKUP_HOUR).padStart(2, "0")}:00 (${BACKUP_TZ})`);
+  }
 }
+startServices();
 
 // ---------- نگهداری ساعتی: پاکسازی KV منقضی‌شده و توکن‌های ورود پنل ----------
 setInterval(() => {

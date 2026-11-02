@@ -22,7 +22,7 @@ let inflight = null;
 
 async function fromDb(env) {
   stats.dbLoad++;
-  const { results } = await env.DB.prepare("SELECT key, value FROM settings").all();
+  const { results } = await env.DB.prepare("SELECT key, value FROM settings WHERE key NOT IN ('install_cfg','install_pending')").all(); // توکن/رمز نصب‌کننده توی کش و KV نمیره
   const map = {};
   for (const r of results || []) map[r.key] = r.value;
   return map;

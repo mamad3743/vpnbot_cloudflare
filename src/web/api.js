@@ -6,12 +6,13 @@
 import PANEL_HTML from "./ui.generated.js";
 import { stats as optStats, invalidateSettings, cacheJson, dropCache } from "./optimizer.js";
 import { cfUsage, cfConfigured } from "./cfstats.js";
+import { verifyPassword, hashPassword, getInstallCfg, saveInstallCfg, adminList as adminListI } from "./install.js";
 
 const enc = new TextEncoder();
 const SESSION_DAYS = 7;
 const TABLES = ["users", "products", "categories", "configs", "orders", "referrals", "channels", "exit_logs", "panels", "ext_services", "settings", "state"];
 // جدول state موقتیه؛ فقط اسم‌های دلخواه سرویس‌ها (svcname:*) بکاپ/بازیابی میشن
-const tFilter = (t) => (t === "state" ? "WHERE key LIKE 'svcname:%'" : "");
+const tFilter = (t) => (t === "state" ? "WHERE key LIKE 'svcname:%'" : t === "settings" ? "WHERE key NOT IN ('install_cfg','install_pending')" : "");
 const VERSION = "5.0.0";
 
 let ORIGIN = "";
@@ -41,7 +42,7 @@ const safeJson = (s, d = {}) => {
 };
 
 async function hmacKey(env) {
-  const secret = env.SESSION_SECRET || `${env.PANEL_PASSWORD || ""}|${env.BOT_TOKEN || ""}|${env.WEBHOOK_SECRET || ""}`;
+  const secret = env.SESSION_SECRET || `${env.PANEL_PASSWORD || env.PANEL_PASSWORD_HASH || ""}|${env.BOT_TOKEN || ""}|${env.WEBHOOK_SECRET || ""}`;
   return crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
 }
 async function signToken(env, payload) {
@@ -166,11 +167,12 @@ export async function handleWeb(request, env, ctx, I) {
 
   // ورود با رمز
   if (m === "POST" && p === "/api/login") {
-    if (!env.PANEL_PASSWORD) return err("ورود با رمز فعال نیست؛ PANEL_PASSWORD رو ست کن یا داخل ربات /panel بزن.", 403);
+    if (!env.PANEL_PASSWORD && !env.PANEL_PASSWORD_HASH) return err("ورود با رمز فعال نیست؛ PANEL_PASSWORD رو ست کن یا داخل ربات /panel بزن.", 403);
     const ip = clientIp(request);
     if (!(await rlCheck(env, ip))) return err("تلاش زیاد. ۱۰ دقیقه بعد دوباره امتحان کن.", 429);
     const body = await request.json().catch(() => ({}));
-    if (!(await safeEqual(env, str(body.password, 200), env.PANEL_PASSWORD))) {
+    const okPw = env.PANEL_PASSWORD ? await safeEqual(env, str(body.password, 200), env.PANEL_PASSWORD) : await verifyPassword(str(body.password, 200), env.PANEL_PASSWORD_HASH);
+    if (!okPw) {
       await rlFail(env, ip);
       return err("رمز اشتباهه.", 401);
     }
@@ -182,7 +184,7 @@ export async function handleWeb(request, env, ctx, I) {
 
   const session = await readToken(env, cookieOf(request, "vp_s"));
   if (!session) {
-    if (p === "/api/me") return json({ ok: false, error: "unauth", passwordLogin: !!env.PANEL_PASSWORD }, 401);
+    if (p === "/api/me") return json({ ok: false, error: "unauth", passwordLogin: !!(env.PANEL_PASSWORD || env.PANEL_PASSWORD_HASH) }, 401);
     return err("unauth", 401);
   }
   if (m !== "GET") {
@@ -211,7 +213,7 @@ export async function handleWeb(request, env, ctx, I) {
 R("GET", "/api/me", async ({ env, session }) =>
   json({
     ok: true, version: VERSION, runtime: env.RUNTIME === "node" ? "railway" : "cloudflare", user: session.u,
-    kv: !!env.KV, cf: cfConfigured(env), password: !!env.PANEL_PASSWORD,
+    kv: !!env.KV, cf: cfConfigured(env), password: !!(env.PANEL_PASSWORD || env.PANEL_PASSWORD_HASH),
   })
 );
 
@@ -747,6 +749,60 @@ export async function runPanelCleanup(env) {
   await env.DB.prepare("DELETE FROM state WHERE (key LIKE 'plogin:%' OR key LIKE 'rl:%') AND updated_at < ?").bind(Date.now() - 86400000).run();
 }
 
+// ---------- اتصال و دسترسی (مقادیر ذخیره‌شده توسط نصب‌کننده) ----------
+R("GET", "/api/install/info", async ({ env }) => {
+  const from = env.__fromDb || [];
+  const src = (k) => (from.includes(k) ? "db" : env[k] ? "env" : "none");
+  return json({
+    ok: true, admins: adminListI(env.ADMIN_IDS),
+    sources: { BOT_TOKEN: src("BOT_TOKEN"), ADMIN_IDS: src("ADMIN_IDS"), PANEL_PASSWORD: env.PANEL_PASSWORD ? "env" : from.includes("PANEL_PASSWORD_HASH") ? "db" : "none" },
+  });
+});
+R("POST", "/api/install/update", async ({ env, body, I }) => {
+  const b = await body();
+  const from = env.__fromDb || [];
+  const cfg = await getInstallCfg(env, true);
+  const changed = [];
+  if (b.admins !== undefined) {
+    if (!from.includes("ADMIN_IDS")) return err("آیدی ادمین‌ها از متغیر محیطی ADMIN_IDS میاد؛ از همون‌جا عوضش کن.");
+    const ids = [...new Set((Array.isArray(b.admins) ? b.admins : String(b.admins).split(/[,\s،]+/)).map((x) => String(x).trim()).filter(Boolean))];
+    if (!ids.length || ids.some((a) => !/^\d{5,15}$/.test(a))) return err("آیدی عددی ادمین‌ها نامعتبره (فقط عدد، حداقل یکی).");
+    cfg.ADMIN_IDS = ids.join(",");
+    changed.push("admins");
+  }
+  let relogin = false;
+  if (b.password) {
+    if (env.PANEL_PASSWORD) return err("رمز پنل از متغیر محیطی PANEL_PASSWORD میاد؛ از همون‌جا عوضش کن.");
+    const pw = String(b.password);
+    if (pw.length < 8 || pw.length > 200) return err("رمز باید حداقل ۸ کاراکتر باشه.");
+    cfg.PANEL_PASSWORD_HASH = await hashPassword(pw);
+    changed.push("password");
+    relogin = true;
+  }
+  if (b.token) {
+    if (!from.includes("BOT_TOKEN")) return err("توکن ربات از متغیر محیطی BOT_TOKEN میاد؛ از همون‌جا عوضش کن.");
+    const token = String(b.token).trim();
+    if (!/^\d{5,}:[A-Za-z0-9_-]{30,}$/.test(token)) return err("فرمت توکن درست نیست.");
+    const me = await (await fetch(`https://api.telegram.org/bot${token}/getMe`)).json().catch(() => ({}));
+    if (!me.ok) return err(`تلگرام توکن رو نپذیرفت: ${me.description || "نامعتبر"}`);
+    if (ORIGIN.startsWith("https://")) {
+      const r = await (await fetch(`https://api.telegram.org/bot${token}/setWebhook`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: `${ORIGIN}/webhook/${env.WEBHOOK_SECRET}`, allowed_updates: ["message", "callback_query", "chat_member"] }) })).json().catch(() => ({}));
+      if (!r.ok) return err(`وبهوک ربات جدید ست نشد: ${r.description || "؟"}`);
+    }
+    cfg.BOT_TOKEN = token;
+    changed.push("token");
+  }
+  if (!changed.length) return err("چیزی برای تغییر نیست.");
+  await saveInstallCfg(env, cfg);
+  if (env.RUNTIME === "node") {
+    // سرور Node یک env ثابت داره؛ مقدارهای تغییرکرده رو همین‌جا جایگزین می‌کنیم
+    if (cfg.ADMIN_IDS && from.includes("ADMIN_IDS")) env.ADMIN_IDS = cfg.ADMIN_IDS;
+    if (cfg.BOT_TOKEN && from.includes("BOT_TOKEN")) env.BOT_TOKEN = cfg.BOT_TOKEN;
+    if (cfg.PANEL_PASSWORD_HASH && from.includes("PANEL_PASSWORD_HASH")) env.PANEL_PASSWORD_HASH = cfg.PANEL_PASSWORD_HASH;
+  }
+  return json({ ok: true, changed, relogin });
+});
+
 // ---------- سیستم / وبهوک ----------
 R("GET", "/api/system", async ({ env, I }) => {
   const [me, wh] = await Promise.all([I.rawCall(env, "getMe", {}).catch(() => null), I.rawCall(env, "getWebhookInfo", {}).catch(() => null)]);
@@ -757,7 +813,7 @@ R("GET", "/api/system", async ({ env, I }) => {
     bot: me?.ok ? { username: me.result.username, name: me.result.first_name } : null,
     webhook: wh?.ok ? { url_set: !!cur, matches: !!expected && cur === expected, pending: wh.result.pending_update_count, last_error: wh.result.last_error_message || null, last_error_at: (wh.result.last_error_date || 0) * 1000 } : null,
     env: {
-      BOT_TOKEN: !!env.BOT_TOKEN, ADMIN_IDS: adminList(env).length, WEBHOOK_SECRET: !!env.WEBHOOK_SECRET, PANEL_PASSWORD: !!env.PANEL_PASSWORD,
+      BOT_TOKEN: !!env.BOT_TOKEN, ADMIN_IDS: adminList(env).length, WEBHOOK_SECRET: !!env.WEBHOOK_SECRET, PANEL_PASSWORD: !!(env.PANEL_PASSWORD || env.PANEL_PASSWORD_HASH),
       SESSION_SECRET: !!env.SESSION_SECRET, KV: !!env.KV, CF_API_TOKEN: !!env.CF_API_TOKEN, CF_ACCOUNT_ID: !!env.CF_ACCOUNT_ID,
       D1_DATABASE_ID: !!env.D1_DATABASE_ID, KV_NAMESPACE_ID: !!env.KV_NAMESPACE_ID, NO_BUTTON_STYLE: env.NO_BUTTON_STYLE === "1",
     },

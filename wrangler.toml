@@ -26,6 +26,9 @@ crons = ["* * * * *", "30 20 * * *"]
 #   wrangler secret put CF_API_TOKEN     (دسترسی Account Analytics: Read)
 #   wrangler secret put CF_ACCOUNT_ID
 [vars]
+# کد قفل ویزارد نصب (/install): یک مقدار دلخواه و محرمانه (حداقل ۶ کاراکتر) بذار؛ «change-me» قبول نمیشه.
+# بعد از نصب می‌تونی اینو خالی کنی.
+INSTALL_CODE = "change-me"
 CF_SCRIPT_NAME = "config-sales-bot"
 D1_DATABASE_ID = ""      # همون database_id بالا
 KV_NAMESPACE_ID = ""     # اگه KV ساختی، id اون

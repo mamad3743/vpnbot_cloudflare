@@ -12,6 +12,7 @@ import { PANEL_TYPES, hydratePanel, randomId, isIpHost, customPort, panelCreateU
 import { qrPng } from "./qr.js";
 import { getSettingCached, setSettingCached } from "./web/optimizer.js";
 import { handleWeb, setOrigin, createLoginLink, runPanelCleanup } from "./web/api.js";
+import { handleInstall, handleInstallWebhook, resolveEnv, isInstalled } from "./web/install.js";
 
 const TG = (token) => `https://api.telegram.org/bot${token}`;
 
@@ -624,7 +625,8 @@ async function dumpDatabaseSql(env) {
     const qn = `"${t.name.replace(/"/g, '""')}"`;
     counts[t.name] = 0;
     for (let offset = 0; ; offset += 2000) {
-      const { results } = await env.DB.prepare(`SELECT * FROM ${qn} ORDER BY rowid LIMIT 2000 OFFSET ?`).bind(offset).all();
+      const where = t.name === "settings" ? "WHERE key NOT IN ('install_cfg','install_pending')" : ""; // توکن/رمز نصب‌کننده توی بکاپ نمیره
+      const { results } = await env.DB.prepare(`SELECT * FROM ${qn} ${where} ORDER BY rowid LIMIT 2000 OFFSET ?`).bind(offset).all();
       if (!results || !results.length) break;
       for (const row of results) {
         const cols = Object.keys(row);
@@ -4199,6 +4201,8 @@ export const internals = {
 export default {
   // Cloudflare: Cron Trigger (wrangler.toml)  |  Railway: تایمر server.js هر شب ساعت ۰۰:۰۰
   async scheduled(event, env) {
+    env = await resolveEnv(env);
+    if (!isInstalled(env)) return { idle: true }; // هنوز نصب نشده
     // Cron هر دقیقه / تایمر سرور = ادامه‌ی پیام همگانی؛ بقیه = بکاپ شبانه
     if (event.cron === "* * * * *") return runBroadcastTick(env, { maxSends: 40 });
     if (event.cron === "broadcast") return runBroadcastTick(env, { unlimited: true });
@@ -4209,10 +4213,23 @@ export default {
 
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    env = await resolveEnv(env); // متغیرهای محیطی + تنظیمات ذخیره‌شده‌ی نصب‌کننده
     setOrigin(env, url.origin);
 
     if (request.method === "GET" && url.pathname === "/health") {
       return new Response("ok");
+    }
+
+    // ---------- نصب‌کننده (/install) ----------
+    if (url.pathname === "/install" || url.pathname.startsWith("/install/")) return handleInstall(request, env, ctx);
+    if (!isInstalled(env)) {
+      // وبهوک موقع نصب (تشخیص آیدی ادمین)
+      if (request.method === "POST" && url.pathname.startsWith("/webhook/")) {
+        const r = await handleInstallWebhook(request, env, url).catch(() => null);
+        if (r) return r;
+      }
+      if (url.pathname === "/panel" || url.pathname === "/" || url.pathname.startsWith("/panel/")) return Response.redirect(`${url.origin}/install`, 302);
+      if (url.pathname.startsWith("/api/")) return new Response(JSON.stringify({ ok: false, error: "ربات هنوز نصب نشده؛ /install رو باز کن." }), { status: 503, headers: { "Content-Type": "application/json" } });
     }
 
     if (request.method === "POST" && url.pathname === `/webhook/${env.WEBHOOK_SECRET}`) {
