@@ -217,9 +217,24 @@ R("GET", "/api/me", async ({ env, session }) =>
   })
 );
 
+// ترمیم محصول‌های حجم‌دلخواه که نسخه‌ی قبلی پنل با قیمت ۰ ساخته بود («از ۰ تومان» توی ربات)
+async function healCustomProducts(env) {
+  const { results } = await env.DB.prepare("SELECT id, custom FROM products WHERE custom IS NOT NULL AND price <= 0").all();
+  const stmts = [];
+  for (const r of results || []) {
+    const c = safeJson(r.custom, null);
+    if (!c || !(c.price_per_gb >= 0) || !(c.min_gb > 0)) continue;
+    const price = Math.round(c.min_gb * c.price_per_gb + c.min_days * (c.price_per_day || 0));
+    if (price > 0) stmts.push(env.DB.prepare("UPDATE products SET price=?, duration_days=?, data_limit_gb=? WHERE id=?").bind(price, c.min_days, c.min_gb, r.id));
+  }
+  if (stmts.length) await env.DB.batch(stmts);
+  return stmts.length;
+}
+
 const DAY = 86400000, TZ = 12600000; // ایران UTC+3:30
 R("GET", "/api/overview", async ({ env, I }) => {
   await I.ensureCatSchema(env);
+  await healCustomProducts(env).catch(() => {});
   const now = Date.now();
   const t0 = Math.floor((now + TZ) / DAY) * DAY - TZ;
   const d7 = t0 - 6 * DAY, d30 = t0 - 29 * DAY, d14 = t0 - 13 * DAY;
@@ -374,6 +389,7 @@ R("DELETE", "/api/categories/:id", async ({ env, params }) => {
 // ---------- محصولات ----------
 R("GET", "/api/products", async ({ env, I }) => {
   await I.ensureCatSchema(env);
+  await healCustomProducts(env).catch(() => {});
   const { results } = await env.DB.prepare(`SELECT p.*, pn.name panel_name, c.name category_name, COALESCE(s.avail,0) avail, COALESCE(s.used,0) used
     FROM products p LEFT JOIN panels pn ON pn.id=p.panel_id LEFT JOIN categories c ON c.id=p.category_id
     LEFT JOIN (SELECT product_id, SUM(is_used=0) avail, SUM(is_used=1) used FROM configs GROUP BY product_id) s ON s.product_id=p.id ORDER BY p.id DESC`).all();
@@ -386,7 +402,7 @@ R("POST", "/api/products", async ({ env, body, I }) => {
   if (!name) return err("نام محصول الزامیه");
   const price = Math.round(num(b.price, 0));
   if (price < 0) return err("قیمت منفی نمیشه");
-  let custom = null;
+  let custom = null, ck = null;
   if (b.custom) {
     const c = b.custom;
     const k = { min_gb: num(c.min_gb), max_gb: num(c.max_gb), min_days: int(c.min_days), max_days: int(c.max_days), price_per_gb: num(c.price_per_gb), price_per_day: num(c.price_per_day) };
@@ -395,9 +411,11 @@ R("POST", "/api/products", async ({ env, body, I }) => {
     if (k.price_per_gb < 0 || k.price_per_day < 0) return err("قیمت‌ها منفی نمیشن");
     if (Math.round(k.min_gb * k.price_per_gb + k.min_days * k.price_per_day) <= 0) return err("قیمت کمترین بسته صفر میشه");
     custom = JSON.stringify(k);
+    ck = k;
   }
-  const vals = [name, custom ? 0 : price, int(b.duration_days, 30), str(b.description, 1500), b.is_trial ? 1 : 0, b.enabled === false || b.enabled === 0 ? 0 : 1,
-    b.panel_id ? int(b.panel_id) : null, num(b.data_limit_gb, 0), custom, b.category_id ? int(b.category_id) : null];
+  // محصول حجم‌دلخواه: مثل خود ربات، قیمت = کمترین بسته (برچسب «از X تومان»)، مدت = کمترین روز، حجم = کمترین گیگ
+  const vals = [name, ck ? Math.round(ck.min_gb * ck.price_per_gb + ck.min_days * ck.price_per_day) : price, ck ? ck.min_days : int(b.duration_days, 30), str(b.description, 1500), b.is_trial ? 1 : 0, b.enabled === false || b.enabled === 0 ? 0 : 1,
+    b.panel_id ? int(b.panel_id) : null, ck ? ck.min_gb : num(b.data_limit_gb, 0), custom, b.category_id ? int(b.category_id) : null];
   if (b.is_trial) await env.DB.prepare("UPDATE products SET is_trial=0 WHERE is_trial=1").run(); // فقط یک محصول تست
   if (b.id) {
     await env.DB.prepare(`UPDATE products SET name=?, price=?, duration_days=?, description=?, is_trial=?, enabled=?, panel_id=?, data_limit_gb=?, custom=?, category_id=? WHERE id=?`).bind(...vals, b.id).run();
@@ -519,8 +537,9 @@ R("GET", "/api/settings", async ({ env, I }) => {
       menu: ui.menu, roles: ui.roles, rules_enabled: ui.rules_enabled !== false, rules_text: ui.rules_text || "", rules_btn: ui.rules_btn || "",
       qr_enabled: ui.qr_enabled !== false, ext_verify: ui.ext_verify !== false,
       welcome_text: ui.welcome_text || "", welcome_back_text: ui.welcome_back_text || "",
+      layout: Array.isArray(ui.layout) ? ui.layout : null,
     },
-    defaults: { rules_text: I.DEFAULT_RULES_TEXT, rules_btn: I.DEFAULT_RULES_BTN, welcome_text: I.DEFAULT_WELCOME_TEXT, welcome_back_text: I.DEFAULT_WELCOME_BACK_TEXT, menu: I.MENU_ITEMS },
+    defaults: { layout: I.DEFAULT_MENU_LAYOUT, rules_text: I.DEFAULT_RULES_TEXT, rules_btn: I.DEFAULT_RULES_BTN, welcome_text: I.DEFAULT_WELCOME_TEXT, welcome_back_text: I.DEFAULT_WELCOME_BACK_TEXT, menu: I.MENU_ITEMS },
     log: { chat_id: log.chat_id, off: log.off, topics: Object.entries(I.LOG_TOPICS).map(([k, v]) => ({ key: k, label: v.label })) },
     channels,
   });
@@ -539,7 +558,9 @@ R("POST", "/api/settings", async ({ env, body, I, session }) => {
   }
   if (Array.isArray(b.wheel)) {
     const w = b.wheel.map((x) => ({ label: str(x.label, 60).trim(), amount: Math.max(0, Math.round(num(x.amount))), weight: Math.max(0, num(x.weight)) })).filter((x) => x.label);
-    if (!w.length || !w.some((x) => x.weight > 0)) return err("حداقل یک جایزه با وزن بیشتر از صفر لازمه");
+    if (!w.length) return err("حداقل یک جایزه لازمه");
+    // انتخابگر ربات وزن ۰ رو ۱ حساب می‌کنه ((p.weight || 1))؛ پس وزن صفر معنی «غیرفعال» نمیده و نباید ذخیره بشه
+    if (w.some((x) => !(x.weight > 0))) return err("وزن هر جایزه باید بیشتر از صفر باشه. برای حذف یک جایزه، خودش رو پاک کن.");
     await I.setSetting(env, "wheel_prizes", JSON.stringify(w));
   }
   if (b.ui) {
@@ -554,6 +575,27 @@ R("POST", "/api/settings", async ({ env, body, I, session }) => {
         if ("style" in v) { if (v.style && v.style !== def.style && I.VALID_STYLES.includes(v.style)) cur.style = v.style; else delete cur.style; }
         if ("hidden" in v) { if (v.hidden && key !== "admin") cur.hidden = true; else delete cur.hidden; }
         if (Object.keys(cur).length) cfg.menu[key] = cur; else delete cfg.menu[key];
+      }
+    }
+    if ("layout" in u) {
+      if (u.layout === null) delete cfg.layout;
+      else {
+        const keys = I.MENU_ITEMS.map((m) => m.key);
+        if (!Array.isArray(u.layout) || u.layout.length > 14) return err("چیدمان نامعتبره");
+        const seen = new Set(), rows = [];
+        for (const r of u.layout) {
+          if (!Array.isArray(r) || r.length > 8) return err("هر ردیف حداکثر ۸ دکمه می‌تونه داشته باشه.");
+          const row = [];
+          for (const k of r) {
+            if (!keys.includes(k) || seen.has(k)) return err("دکمه‌ی نامعتبر یا تکراری توی چیدمان.");
+            seen.add(k);
+            row.push(k);
+          }
+          if (row.length) rows.push(row);
+        }
+        for (const k of keys) if (!seen.has(k)) rows.push([k]); // دکمه‌ای که جا نشده آخر میاد
+        if (JSON.stringify(rows) === JSON.stringify(I.DEFAULT_MENU_LAYOUT)) delete cfg.layout;
+        else cfg.layout = rows;
       }
     }
     if (u.roles && typeof u.roles === "object") {

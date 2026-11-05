@@ -203,7 +203,7 @@ const ST={tab:"general",data:null};
 const COLORS=[["primary","آبی"],["success","سبز"],["danger","قرمز"],["none","بدون رنگ"]];
 PAGES.settings=async v=>{
   ST.data=await api("/api/settings");
-  v.innerHTML=head("تنظیمات ربات","متن‌ها، دکمه‌ها، قوانین، گردونه، کانال‌ها و گروه گزارش")+`<div class="tabs">${[["general","عمومی"],["buttons","دکمه‌ها"],["rules","قوانین"],["welcome","خوش‌آمد"],["wheel","گردونه"],["channels","کانال اجباری"],["log","گروه گزارش"]].map(([k,l])=>`<span class="tab ${ST.tab===k?"on":""}" data-a="stab" data-k="${k}" tabindex="0">${l}</span>`).join("")}</div><div id="sb"></div>`;
+  v.innerHTML=head("تنظیمات ربات","متن‌ها، دکمه‌ها، قوانین، گردونه، کانال‌ها و گروه گزارش")+`<div class="tabs">${[["general","عمومی"],["buttons","دکمه‌ها"],["layout","چیدمان منو"],["rules","قوانین"],["welcome","خوش‌آمد"],["wheel","گردونه"],["channels","کانال اجباری"],["log","گروه گزارش"]].map(([k,l])=>`<span class="tab ${ST.tab===k?"on":""}" data-a="stab" data-k="${k}" tabindex="0">${l}</span>`).join("")}</div><div id="sb"></div>`;
   drawSettings();
 };
 A.stab=el=>{ST.tab=el.dataset.k;$$(".tab").forEach(t=>t.classList.toggle("on",t===el));drawSettings()};
@@ -220,6 +220,12 @@ function drawSettings(){
     el.innerHTML=`<div class="note" style="margin-bottom:14px">تغییر متن/رنگ برای هر کاربر از /start بعدی اعمال میشه. رنگ دکمه‌ها فقط روی نسخه‌ی جدید تلگرام دیده میشه. دکمه‌ی خاموش از منو برداشته میشه و کار نمی‌کنه.</div><div class="list">${d.defaults.menu.map(m=>{const c=menu[m.key]||{};return `<div class="it" data-k="${m.key}"><div style="flex:1;min-width:200px"><input type="text" name="label" value="${esc(c.label||m.label)}" aria-label="متن دکمه"></div><div style="width:130px">${sel("style",COLORS,c.style||m.style)}</div><label style="display:flex;gap:8px;align-items:center">${m.key==="admin"?'<span class="m">همیشه روشن</span>':`<span class="m">نمایش</span>${sw("show",!c.hidden)}`}</label></div>`}).join("")}</div>
     <div class="card" style="margin-top:16px"><h3>${ic("sliders")}رنگ دسته‌های دکمه‌های شیشه‌ای</h3><div class="row3">${[["primary","معمولی"],["success","تایید/پرداخت"],["danger","حذف/رد"]].map(([r,l])=>field(l,sel("role_"+r,COLORS,roles[r]||r))).join("")}</div></div>${saveBtn()}`;
     SAVE=()=>{const menu={};$$("[data-k]",el).forEach(row=>{const k=row.dataset.k;menu[k]={label:$("[name=label]",row).value,style:$("[name=style]",row).value,hidden:k==="admin"?false:!$("[name=show]",row).checked}});const f=formData(el),roles={};for(const r of["primary","success","danger"])roles[r]=f["role_"+r];return api("/api/settings",{method:"POST",body:{ui:{menu,roles}}})};
+  }else if(ST.tab==="layout"){
+    // دکمه‌های خاموش‌شده توی ویرایشگر نمایش داده نمیشن (موقع ذخیره ته چیدمان می‌رن؛ ربات که هرجا باشن نشونشون نمیده)
+    const hid=new Set(Object.entries(d.ui.menu).filter(([,v])=>v&&v.hidden).map(([k])=>k));
+    const L=(d.ui.layout||d.defaults.layout).map(r=>r.filter(k=>!hid.has(k))).filter(r=>r.length),have=new Set(L.flat());
+    d.defaults.menu.forEach(m=>{if(!have.has(m.key)&&!hid.has(m.key))L.push([m.key])});
+    ST.layout=L;ST.layoutHidden=d.defaults.menu.map(m=>m.key).filter(k=>hid.has(k));drawLayout();
   }else if(ST.tab==="rules"){
     const u=d.ui;
     el.innerHTML=`<div class="card"><div class="sr" style="padding-top:0"><div>نمایش قوانین قبل از استفاده<small>هر کاربر یک‌بار با دکمه‌ی سبز می‌پذیره</small></div>${sw("rules_enabled",u.rules_enabled)}</div>${field("متن قوانین",`<textarea name="rules_text" style="min-height:220px">${esc(u.rules_text||d.defaults.rules_text)}</textarea>`,"HTML مجاز: b, i, u, s, code, pre, a, blockquote")}${field("متن دکمه‌ی پذیرش",inp("rules_btn",u.rules_btn||d.defaults.rules_btn))}<div style="display:flex;gap:8px;flex-wrap:wrap">${saveBtn().replace("margin-top:6px","")}<button class="btn" data-a="rprev">${ic("send")}پیش‌نمایش در تلگرام من</button></div></div>`;
@@ -240,10 +246,53 @@ function drawSettings(){
 }
 function drawWheel(){
   const el=$("#sb"),W=ST.wheel,tw=W.reduce((n,x)=>n+Math.max(0,Number(x.weight)||0),0)||1;
-  el.innerHTML=`<div class="card"><p class="pd" style="margin-bottom:12px">هر کاربر هر چند وقت یک بار می‌چرخونه. احتمال هر جایزه = وزنش تقسیم بر مجموع وزن‌ها.</p><div class="list">${W.map((x,i)=>`<div class="it" data-i="${i}"><div style="flex:1;min-width:150px"><input type="text" name="label" value="${esc(x.label)}" aria-label="عنوان"></div><div style="width:130px"><input type="text" inputmode="numeric" name="amount" value="${x.amount}" aria-label="مبلغ (تومان)" placeholder="مبلغ"></div><div style="width:90px"><input type="text" inputmode="numeric" name="weight" value="${x.weight}" aria-label="وزن" placeholder="وزن"></div><span class="chip vi num" style="min-width:56px;justify-content:center">${fa(Math.round((Number(x.weight)||0)/tw*1000)/10)}٪</span><button class="btn sm bad" data-a="wdel" data-i="${i}">${ic("trash")}</button></div>`).join("")}</div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn" data-a="wadd">${ic("plus")}جایزه جدید</button><button class="btn pri" data-a="ssave">${ic("check")}ذخیره</button></div></div>`;
-  $$("[data-i] input",el).forEach(i=>i.oninput=()=>{const r=i.closest("[data-i]");const x=ST.wheel[+r.dataset.i];x[i.name]=i.name==="label"?i.value:Number(nd(i.value))||0;if(i.name==="weight"){const t=ST.wheel.reduce((n,y)=>n+Math.max(0,y.weight||0),0)||1;$$("[data-i]",el).forEach((rr,k)=>{$(".chip",rr).textContent=fa(Math.round((ST.wheel[k].weight||0)/t*1000)/10)+"٪"})}});
+  el.innerHTML=`<div class="card"><p class="pd" style="margin-bottom:12px">هر کاربر هر چند وقت یک بار می‌چرخونه. احتمال هر جایزه = وزنش تقسیم بر مجموع وزن‌ها. وزن هر جایزه باید بیشتر از صفر باشه؛ برای حذف یک جایزه پاکش کن.</p><div class="list">${W.map((x,i)=>`<div class="it" data-i="${i}"><div style="flex:1;min-width:150px"><input type="text" name="label" value="${esc(x.label)}" aria-label="عنوان"></div><div style="width:130px"><input type="text" inputmode="numeric" name="amount" value="${x.amount}" aria-label="مبلغ (تومان)" placeholder="مبلغ"></div><div style="width:90px"><input type="text" inputmode="numeric" name="weight" value="${x.weight}" aria-label="وزن" placeholder="وزن"></div><span class="chip ${(Number(x.weight)||0)>0?"vi":"er"} num" style="min-width:56px;justify-content:center">${(Number(x.weight)||0)>0?fa(Math.round((Number(x.weight)||0)/tw*1000)/10)+"٪":"وزن ۰؟"}</span><button class="btn sm bad" data-a="wdel" data-i="${i}">${ic("trash")}</button></div>`).join("")}</div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn" data-a="wadd">${ic("plus")}جایزه جدید</button><button class="btn pri" data-a="ssave">${ic("check")}ذخیره</button></div></div>`;
+  $$("[data-i] input",el).forEach(i=>i.oninput=()=>{const r=i.closest("[data-i]");const x=ST.wheel[+r.dataset.i];x[i.name]=i.name==="label"?i.value:Number(nd(i.value))||0;if(i.name==="weight"){const t=ST.wheel.reduce((n,y)=>n+Math.max(0,y.weight||0),0)||1;$$("[data-i]",el).forEach((rr,k)=>{const wv=ST.wheel[k].weight||0,ch=$(".chip",rr);ch.textContent=wv>0?fa(Math.round(wv/t*1000)/10)+"٪":"وزن ۰؟";ch.className="chip "+(wv>0?"vi":"er")+" num"})}});
   SAVE=()=>api("/api/settings",{method:"POST",body:{wheel:ST.wheel}});
 }
+
+/* ---- ویرایشگر چیدمان منو (drag & drop + دکمه‌های جهت‌دار برای موبایل) ---- */
+const LAY_MAX=4;
+function drawLayout(){
+  const el=$("#sb"),d=ST.data,L=ST.layout;
+  const info=k=>{const m=d.defaults.menu.find(x=>x.key===k),c=d.ui.menu[k]||{};return{t:c.label||m.label,s:c.style||m.style,h:!!c.hidden}};
+  const gap=i=>`<div class="lgap" data-gap="${i}">+ ردیف جدید</div>`;
+  const chip=k=>{const o=info(k);return `<div class="lchip s-${o.s}" draggable="true" data-k="${k}"><span class="lt">${esc(o.t)}</span>${k==="admin"?"<small>فقط ادمین‌ها</small>":""}<span class="lctl"><button type="button" data-m="r" aria-label="جابه‌جایی به راست" title="راست">→</button><button type="button" data-m="l" aria-label="جابه‌جایی به چپ" title="چپ">←</button><button type="button" data-m="u" aria-label="ردیف بالا" title="بالا">↑</button><button type="button" data-m="d" aria-label="ردیف پایین" title="پایین">↓</button></span></div>`};
+  el.innerHTML=`<div class="card"><p class="pd" style="margin-bottom:12px">دکمه‌ها رو بکش و رها کن (یا از فلش‌ها استفاده کن) تا جاشون عوض بشه؛ هر ردیف حداکثر ${fa(LAY_MAX)} دکمه. متن، رنگ و پنهان‌بودن دکمه‌ها از تب «دکمه‌ها» تنظیم میشه.</p>
+  <div class="kbd-h"><span>پیش‌نمایش کیبورد ربات</span><span>${fa(L.length)} ردیف</span></div>
+  <div class="kbd" id="kbd">${L.map((r,i)=>gap(i)+`<div class="lrow" data-r="${i}">${r.map(chip).join("")}</div>`).join("")+gap(L.length)}</div>
+  ${ST.layoutHidden.length?`<div class="pd" style="max-width:600px;margin:12px auto 0;font-size:12.5px">${ic("alert")} ${fa(ST.layoutHidden.length)} دکمه‌ی خاموش اینجا نمایش داده نمیشه: ${ST.layoutHidden.map(k=>esc(info(k).t)).join("، ")}. برای چیدن‌شون اول از تب «دکمه‌ها» روشنشون کن.</div>`:""}
+  <div class="note" style="margin:14px auto 0;max-width:600px">چیدمان جدید برای هر کاربر با اولین پیامی که ربات بهش می‌فرسته (مثلا بعد از /start) روی کیبوردش میاد. ترتیب چپ/راست داخل تلگرام ممکنه بسته به زبان برنامه‌ی کاربر متفاوت باشه؛ بعد از ذخیره یک‌بار توی تلگرام خودت چک کن.</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;justify-content:center"><button class="btn pri" data-a="ssave">${ic("check")}ذخیره چیدمان</button><button class="btn" data-a="lreset">${ic("refresh")}بازگشت به پیش‌فرض</button></div></div>`;
+  SAVE=()=>api("/api/settings",{method:"POST",body:{ui:{layout:[...ST.layout,...ST.layoutHidden.map(k=>[k])]}}});
+  wireLayout(el);
+}
+function layFind(k){const L=ST.layout;for(let r=0;r<L.length;r++){const c=L[r].indexOf(k);if(c>=0)return[r,c]}return null}
+function layClean(){ST.layout=ST.layout.filter(r=>r.length)}
+function layApply(fn){const bak=JSON.stringify(ST.layout);fn();layClean();if(ST.layout.some(r=>r.length>LAY_MAX)){ST.layout=JSON.parse(bak);toast(`هر ردیف حداکثر ${fa(LAY_MAX)} دکمه می‌تونه داشته باشه`,"er")}drawLayout()}
+function layMove(k,op){
+  layApply(()=>{const L=ST.layout,[r,c]=layFind(k);
+    if(op==="r"&&c>0)[L[r][c],L[r][c-1]]=[L[r][c-1],L[r][c]]; // در صفحه‌ی راست‌به‌چین، اندیس کمتر = سمت راست
+    if(op==="l"&&c<L[r].length-1)[L[r][c],L[r][c+1]]=[L[r][c+1],L[r][c]];
+    if(op==="u"){L[r].splice(c,1);if(r===0){L[r].length?L.unshift([k]):L[r].push(k)}else L[r-1].splice(Math.min(c,L[r-1].length),0,k)}
+    if(op==="d"){L[r].splice(c,1);if(r===L.length-1){L[r].length?L.push([k]):L[r].push(k)}else L[r+1].splice(Math.min(c,L[r+1].length),0,k)}});
+}
+function layDrop(k,t){
+  layApply(()=>{const L=ST.layout,[r,c]=layFind(k);L[r].splice(c,1);
+    if(t.gap!==undefined)L.splice(+t.gap,0,[k]);
+    else if(t.before){const [tr,tc]=layFind(t.before);L[tr].splice(tc,0,k)}
+    else if(t.row!==undefined)L[+t.row].push(k)});
+}
+function wireLayout(el){
+  let drag=null;const clr=()=>$$(".over",el).forEach(x=>x.classList.remove("over"));
+  el.onclick=e=>{const b=e.target.closest("[data-m]");if(b)layMove(b.closest(".lchip").dataset.k,b.dataset.m)};
+  el.ondragstart=e=>{const c=e.target.closest?.(".lchip");if(!c)return;drag=c.dataset.k;c.classList.add("drag");e.dataTransfer.effectAllowed="move";try{e.dataTransfer.setData("text/plain",drag)}catch{}};
+  el.ondragend=()=>{drag=null;clr();$$(".drag",el).forEach(x=>x.classList.remove("drag"))};
+  el.ondragover=e=>{if(!drag)return;const t=e.target.closest(".lchip,.lgap,.lrow");if(!t)return;e.preventDefault();clr();t.classList.add("over")};
+  el.ondrop=e=>{if(!drag)return;e.preventDefault();const k=drag,chip=e.target.closest(".lchip"),gap=e.target.closest(".lgap"),row=e.target.closest(".lrow");drag=null;
+    if(chip&&chip.dataset.k!==k)layDrop(k,{before:chip.dataset.k});else if(gap)layDrop(k,{gap:gap.dataset.gap});else if(row)layDrop(k,{row:row.dataset.r});else drawLayout()};
+}
+A.lreset=async()=>{if(await confirmBox("چیدمان به حالت پیش‌فرض برگرده؟","بازگشت","pri"))busy(null,async()=>{await api("/api/settings",{method:"POST",body:{ui:{layout:null}}});toast("چیدمان پیش‌فرض برگشت");ST.data=await api("/api/settings");drawSettings()})};
 A.wadd=()=>{ST.wheel.push({label:"🎁 جایزه",amount:0,weight:10});drawWheel()};
 A.wdel=el=>{ST.wheel.splice(+el.dataset.i,1);drawWheel()};
 A.rprev=el=>busy(el,async()=>{const f=formData($("#sb"));await api("/api/settings",{method:"POST",body:{rules_preview:true,rules_preview_text:f.rules_text}});toast("برای تلگرام شما ارسال شد")});

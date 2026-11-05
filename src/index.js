@@ -32,6 +32,8 @@ const MENU_ITEMS = [
   { key: "admin", label: "🛠 پنل مدیریت", style: "primary" },
 ];
 const MENU_BY_KEY = Object.fromEntries(MENU_ITEMS.map((m) => [m.key, m]));
+// چیدمان پیش‌فرض منوی اصلی (هر آرایه = یک ردیف). ادمین از پنل وب می‌تونه عوضش کنه (cfg.layout)
+const DEFAULT_MENU_LAYOUT = [["buy", "renew"], ["trial", "wheel"], ["services", "wallet"], ["referral", "pricing"], ["support", "tutorial"], ["lookup"], ["admin"]];
 const COLOR_EMOJI = { primary: "🟦", success: "🟩", danger: "🟥", none: "⬜" };
 const COLOR_NAME = { primary: "آبی", success: "سبز", danger: "قرمز", none: "بدون رنگ" };
 const VALID_STYLES = ["primary", "success", "danger", "none"];
@@ -92,6 +94,20 @@ function pickRole(btn) {
   if (/^adm:(ord_ok|unban):/.test(d) || /^(paywallet|paycard|renewwallet|renewcard|cpw|cpc|xw|xc|xv|xk):/.test(d) || d === "check_membership") return "success";
   return "primary";
 }
+// چیدمان سفارشی منو: ردیف‌ها رو بر اساس cfg.layout می‌چینه؛ دکمه‌هایی که توی چیدمان نیستن آخر، هرکدوم تک‌ردیفی
+function applyLayout(rows, layout) {
+  const flat = rows.flat();
+  if (!Array.isArray(layout) || !flat.length || flat.some((b) => !b || !b._key)) return rows;
+  const byKey = Object.fromEntries(flat.map((b) => [b._key, b]));
+  const used = new Set();
+  const out = [];
+  for (const r of layout) {
+    const row = (Array.isArray(r) ? r : []).filter((k) => byKey[k] && !used.has(k)).map((k) => (used.add(k), byKey[k]));
+    if (row.length) out.push(row);
+  }
+  for (const k of Object.keys(byKey)) if (!used.has(k)) out.push([byKey[k]]);
+  return out;
+}
 function styleMarkup(markup, cfg) {
   if (!markup) return markup;
   const roles = cfg?.roles || {};
@@ -115,7 +131,7 @@ function styleMarkup(markup, cfg) {
   const out = { ...markup };
   if (markup.inline_keyboard) out.inline_keyboard = markup.inline_keyboard.map((row) => row.map(mapBtn));
   if (markup.keyboard) {
-    out.keyboard = markup.keyboard
+    out.keyboard = applyLayout(markup.keyboard, cfg?.layout)
       .map((row) => row.filter((b) => !(b && b._key && b._key !== "admin" && cfg?.menu?.[b._key]?.hidden)).map(mapBtn))
       .filter((row) => row.length);
   }
@@ -295,15 +311,8 @@ function membershipKeyboard(missing) {
 // ---------- منوها ----------
 function mainMenuKeyboard(admin) {
   const k = (key) => ({ text: MENU_BY_KEY[key].label, _key: key }); // متن/رنگ نهایی در tgCall از تنظیمات اعمال میشه
-  const rows = [
-    [k("buy"), k("renew")],
-    [k("trial"), k("wheel")],
-    [k("services"), k("wallet")],
-    [k("referral"), k("pricing")],
-    [k("support"), k("tutorial")],
-    [k("lookup")],
-  ];
-  if (admin) rows.push([k("admin")]);
+  // دکمه‌ی «پنل مدیریت» فقط برای ادمین‌ها؛ ترتیب نهایی در styleMarkup از تنظیمات (cfg.layout) اعمال میشه
+  const rows = DEFAULT_MENU_LAYOUT.map((r) => r.filter((key) => key !== "admin" || admin).map(k)).filter((r) => r.length);
   return { reply_markup: { keyboard: rows, resize_keyboard: true } };
 }
 
@@ -4191,7 +4200,7 @@ export const internals = {
   sendMessage, rawCall, escapeHtml, fmtMoney, isAdmin, reasonText,
   getSetting, setSetting, loadUiCfg, saveUiCfg, getLogCfg, saveLogCfg, logEvent, getUser, logUserTag,
   fulfillOrder, ensureCatSchema, getPanel, getWheelPrizes, mainMenuKeyboard, clearPanelCache,
-  MENU_ITEMS, LOG_TOPICS, DEFAULT_RULES_TEXT, DEFAULT_RULES_BTN, DEFAULT_WELCOME_TEXT, DEFAULT_WELCOME_BACK_TEXT, VALID_STYLES,
+  MENU_ITEMS, DEFAULT_MENU_LAYOUT, LOG_TOPICS, DEFAULT_RULES_TEXT, DEFAULT_RULES_BTN, DEFAULT_WELCOME_TEXT, DEFAULT_WELCOME_BACK_TEXT, VALID_STYLES,
   PANEL_TYPES, panelTest, isIpHost,
   startBroadcast, stopBroadcast, runBroadcastTick, stateGet, stateDelete,
   dumpDatabaseSql, gzipText, sendBackupToLog,
