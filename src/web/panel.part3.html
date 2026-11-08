@@ -34,7 +34,7 @@ function openProduct(p){
     if(f.is_custom)b.custom={min_gb:nd(f.min_gb),max_gb:nd(f.max_gb),min_days:nd(f.min_days),max_days:nd(f.max_days),price_per_gb:nd(f.price_per_gb),price_per_day:nd(f.price_per_day||0)};
     else{b.price=nd(f.price);b.duration_days=nd(f.duration_days);b.data_limit_gb=nd(f.data_limit_gb||0)}
     await api("/api/products",{method:"POST",body:b});toast("ذخیره شد");c();route()}}],{wide:true});
-  const t=()=>{const on=$("[name=is_custom]",m.root).checked;$("#pf-fixed",m.root).hidden=on;$("#pf-custom",m.root).hidden=!on};$("[name=is_custom]",m.root).onchange=t;t();
+  const t=()=>{const on=$("[name=is_custom]",m.root).checked;$("#pf-fixed",m.root).hidden=on;$("#pf-custom",m.root).hidden=!on;const tr=$("[name=is_trial]",m.root);tr.disabled=on;if(on)tr.checked=false};$("[name=is_custom]",m.root).onchange=t;t();
 }
 A.pnew=()=>openProduct();
 A.pedit=el=>openProduct(PT.products.find(x=>x.id==el.dataset.id));
@@ -203,18 +203,18 @@ const ST={tab:"general",data:null};
 const COLORS=[["primary","آبی"],["success","سبز"],["danger","قرمز"],["none","بدون رنگ"]];
 PAGES.settings=async v=>{
   ST.data=await api("/api/settings");
-  v.innerHTML=head("تنظیمات ربات","متن‌ها، دکمه‌ها، قوانین، گردونه، کانال‌ها و گروه گزارش")+`<div class="tabs">${[["general","عمومی"],["buttons","دکمه‌ها"],["layout","چیدمان منو"],["rules","قوانین"],["welcome","خوش‌آمد"],["wheel","گردونه"],["channels","کانال اجباری"],["log","گروه گزارش"]].map(([k,l])=>`<span class="tab ${ST.tab===k?"on":""}" data-a="stab" data-k="${k}" tabindex="0">${l}</span>`).join("")}</div><div id="sb"></div>`;
+  v.innerHTML=head("تنظیمات ربات","متن‌ها، دکمه‌ها، قوانین، گردونه، کانال‌ها و گروه گزارش")+`<div class="tabs">${[["general","عمومی"],["buttons","دکمه‌ها"],["layout","چیدمان منو"],["miniapp","مینی‌اپ"],["rules","قوانین"],["welcome","خوش‌آمد"],["wheel","گردونه"],["channels","کانال اجباری"],["log","گروه گزارش"]].map(([k,l])=>`<span class="tab ${ST.tab===k?"on":""}" data-a="stab" data-k="${k}" tabindex="0">${l}</span>`).join("")}</div><div id="sb"></div>`;
   drawSettings();
 };
 A.stab=el=>{ST.tab=el.dataset.k;$$(".tab").forEach(t=>t.classList.toggle("on",t===el));drawSettings()};
 const saveBtn=(f)=>`<button class="btn pri" data-a="ssave" style="margin-top:6px">${ic("check")}ذخیره</button>`;
-let SAVE=null;A.ssave=el=>busy(el,async()=>{await SAVE();toast("ذخیره شد");ST.data=await api("/api/settings");drawSettings()});
+let SAVE=null;A.ssave=el=>busy(el,async()=>{const r=await SAVE();if(r&&r.menuButton&&!r.menuButton.ok)toast("ذخیره شد ولی دکمه‌ی منوی تلگرام اعمال نشد: "+r.menuButton.error,"er");else toast("ذخیره شد");ST.data=await api("/api/settings");drawSettings()});
 function drawSettings(){
   const el=$("#sb"),d=ST.data,s=d.simple;
   if(ST.tab==="general"){
-    el.innerHTML=`<div class="card"><div class="row2">${field("نام ربات (در پیام خوش‌آمد)",inp("bot_display_name",s.bot_display_name))}${field("درصد کمیسیون زیرمجموعه‌گیری",inp("referral_percent",s.referral_percent,{num:1}))}</div><div class="row2">${field("شماره کارت",inp("card_number",s.card_number,{dir:"ltr"}))}${field("نام صاحب کارت",inp("card_holder",s.card_holder))}</div>${field("متن پشتیبانی",`<textarea name="support_text">${esc(s.support_text)}</textarea>`,"HTML تلگرام مجازه")}${field("متن آموزش اتصال",`<textarea name="tutorial_text" style="min-height:140px">${esc(s.tutorial_text)}</textarea>`)}
-    <div class="sr"><div>ارسال QR کد همراه لینک اشتراک<small>داخل خود Worker ساخته میشه</small></div>${sw("qr_enabled",d.ui.qr_enabled)}</div><div class="sr"><div>تایید مالکیت در استعلام اشتراک قبلی<small>خاموش کردنش ناامنه</small></div>${sw("ext_verify",d.ui.ext_verify)}</div>${saveBtn()}</div>`;
-    SAVE=()=>{const f=formData(el);return api("/api/settings",{method:"POST",body:{simple:{bot_display_name:f.bot_display_name,referral_percent:nd(f.referral_percent),card_number:nd(f.card_number),card_holder:f.card_holder,support_text:f.support_text,tutorial_text:f.tutorial_text},ui:{qr_enabled:f.qr_enabled,ext_verify:f.ext_verify}}})};
+    el.innerHTML=`<div class="card"><div class="row2">${field("نام ربات (در پیام خوش‌آمد)",inp("bot_display_name",s.bot_display_name))}${field("درصد کمیسیون زیرمجموعه‌گیری",inp("referral_percent",s.referral_percent,{num:1}))}</div><div class="row2">${field("شماره کارت",inp("card_number",s.card_number,{dir:"ltr"}))}${field("نام صاحب کارت",inp("card_holder",s.card_holder))}</div>${field("متن پشتیبانی",`<textarea name="support_text">${esc(s.support_text)}</textarea>`,"HTML تلگرام مجازه")}${field("متن آموزش اتصال",`<textarea name="tutorial_text" style="min-height:140px">${esc(s.tutorial_text)}</textarea>`)}${field("پیام وقتی ربات خاموشه",`<textarea name="bot_off_text" style="min-height:70px">${esc(s.bot_off_text||"")}</textarea>`,"کاربرها این پیام رو می‌بینن؛ خاموش/روشن‌کردن ربات از دکمه‌ی بالای پنل")}
+    <div class="sr"><div>ارسال QR کد همراه لینک اشتراک<small>داخل خود Worker ساخته میشه</small></div>${sw("qr_enabled",d.ui.qr_enabled)}</div><div class="sr"><div>تایید مالکیت در استعلام اشتراک قبلی<small>خاموش کردنش ناامنه</small></div>${sw("ext_verify",d.ui.ext_verify)}</div><div class="sr"><div>انتقال سرویس بین کاربرها<small>کاربر از «سرویس‌های من» می‌تونه سرویس پولی‌ش رو به کاربر دیگه بده (سرویس تست قابل انتقال نیست؛ حداکثر ۵ انتقال در روز برای هر کاربر)</small></div>${sw("transfer_enabled",d.ui.transfer_enabled)}</div>${saveBtn()}</div>`;
+    SAVE=()=>{const f=formData(el);return api("/api/settings",{method:"POST",body:{simple:{bot_display_name:f.bot_display_name,referral_percent:nd(f.referral_percent),card_number:nd(f.card_number),card_holder:f.card_holder,support_text:f.support_text,tutorial_text:f.tutorial_text,bot_off_text:f.bot_off_text},ui:{qr_enabled:f.qr_enabled,ext_verify:f.ext_verify,transfer_enabled:f.transfer_enabled}}})};
   }else if(ST.tab==="buttons"){
     const menu=d.ui.menu,roles=d.ui.roles;
     el.innerHTML=`<div class="note" style="margin-bottom:14px">تغییر متن/رنگ برای هر کاربر از /start بعدی اعمال میشه. رنگ دکمه‌ها فقط روی نسخه‌ی جدید تلگرام دیده میشه. دکمه‌ی خاموش از منو برداشته میشه و کار نمی‌کنه.</div><div class="list">${d.defaults.menu.map(m=>{const c=menu[m.key]||{};return `<div class="it" data-k="${m.key}"><div style="flex:1;min-width:200px"><input type="text" name="label" value="${esc(c.label||m.label)}" aria-label="متن دکمه"></div><div style="width:130px">${sel("style",COLORS,c.style||m.style)}</div><label style="display:flex;gap:8px;align-items:center">${m.key==="admin"?'<span class="m">همیشه روشن</span>':`<span class="m">نمایش</span>${sw("show",!c.hidden)}`}</label></div>`}).join("")}</div>
@@ -226,6 +226,8 @@ function drawSettings(){
     const L=(d.ui.layout||d.defaults.layout).map(r=>r.filter(k=>!hid.has(k))).filter(r=>r.length),have=new Set(L.flat());
     d.defaults.menu.forEach(m=>{if(!have.has(m.key)&&!hid.has(m.key))L.push([m.key])});
     ST.layout=L;ST.layoutHidden=d.defaults.menu.map(m=>m.key).filter(k=>hid.has(k));drawLayout();
+  }else if(ST.tab==="miniapp"){
+    drawMiniapp();
   }else if(ST.tab==="rules"){
     const u=d.ui;
     el.innerHTML=`<div class="card"><div class="sr" style="padding-top:0"><div>نمایش قوانین قبل از استفاده<small>هر کاربر یک‌بار با دکمه‌ی سبز می‌پذیره</small></div>${sw("rules_enabled",u.rules_enabled)}</div>${field("متن قوانین",`<textarea name="rules_text" style="min-height:220px">${esc(u.rules_text||d.defaults.rules_text)}</textarea>`,"HTML مجاز: b, i, u, s, code, pre, a, blockquote")}${field("متن دکمه‌ی پذیرش",inp("rules_btn",u.rules_btn||d.defaults.rules_btn))}<div style="display:flex;gap:8px;flex-wrap:wrap">${saveBtn().replace("margin-top:6px","")}<button class="btn" data-a="rprev">${ic("send")}پیش‌نمایش در تلگرام من</button></div></div>`;
@@ -293,6 +295,35 @@ function wireLayout(el){
     if(chip&&chip.dataset.k!==k)layDrop(k,{before:chip.dataset.k});else if(gap)layDrop(k,{gap:gap.dataset.gap});else if(row)layDrop(k,{row:row.dataset.r});else drawLayout()};
 }
 A.lreset=async()=>{if(await confirmBox("چیدمان به حالت پیش‌فرض برگرده؟","بازگشت","pri"))busy(null,async()=>{await api("/api/settings",{method:"POST",body:{ui:{layout:null}}});toast("چیدمان پیش‌فرض برگشت");ST.data=await api("/api/settings");drawSettings()})};
+
+/* ---- مینی‌اپ ---- */
+const ACCENTS={violet:["#8b5cf6","#c084fc","بنفش"],ocean:["#0ea5e9","#2563eb","اقیانوسی"],emerald:["#10b981","#047857","زمردی"],sunset:["#f97316","#e11d48","غروب"],rose:["#ec4899","#be185d","رز"],gold:["#f59e0b","#b45309","طلایی"]};
+function drawMiniapp(){
+  const el=$("#sb"),m=ST.data.ui.miniapp;ST.mini={...m,sections:{...m.sections}};
+  const sec=(k,l,d)=>`<div class="sr"><div>${l}<small>${d}</small></div>${sw("s_"+k,m.sections[k]!==false)}</div>`;
+  el.innerHTML=`<div class="mini-grid"><div>
+  <div class="card"><div class="sr" style="padding-top:0"><div><b>مینی‌اپ مشتری‌ها</b><small>یه اپ داخل تلگرام برای دیدن سرویس‌ها و مصرف زنده، فروشگاه، کیف پول و دعوت دوستان. خرید/شارژ/تمدید به همون جریان‌های ربات وصل میشن.</small></div>${sw("enabled",m.enabled)}</div>
+  ${m.https?`<div class="linkbox" style="display:flex;gap:8px;align-items:center;margin:10px 0"><code class="mono" style="flex:1;overflow:hidden;text-overflow:ellipsis;font-size:12px">${esc(m.url)}</code><button class="btn sm" data-a="mcopy">${ic("copy")}کپی</button></div>`:`<div class="warn" style="margin:10px 0">مینی‌اپ فقط روی آدرس <b>https</b> کار می‌کنه (تلگرام آدرس http رو قبول نمی‌کنه). پنل رو از آدرس https باز کن.</div>`}
+  <div class="note">با روشن‌کردن: دکمه‌ی <b>«📱 مینی‌اپ»</b> به منوی ربات (قابل جابه‌جایی در «چیدمان منو») و دکمه‌ی آبی کنار نوار پیام اضافه میشه. با خاموش‌کردن هر دو برداشته میشن.</div></div>
+  <div class="card" style="margin-top:16px"><h3>${ic("sliders")}ظاهر و بخش‌ها</h3>
+  <div class="row2">${field("عنوان اپ",inp("title",m.title,{ph:"پیش‌فرض: نام ربات"}))}${field("بنر بالای صفحه‌ی خانه (اختیاری)",inp("banner",m.banner,{ph:"مثلا: 🎁 تخفیف ویژه‌ی این هفته"}))}</div>
+  <div class="lbl" style="margin:4px 0 8px;font-size:12.5px;color:var(--tx2)">رنگ اصلی</div><div class="swatches" id="swatches">${m.accents.map(k=>`<button type="button" class="swatch ${m.accent===k?"on":""}" data-acc="${k}" title="${ACCENTS[k][2]}" aria-label="${ACCENTS[k][2]}" style="background:linear-gradient(135deg,${ACCENTS[k][0]},${ACCENTS[k][1]})"></button>`).join("")}</div>
+  <div style="margin-top:14px">${sec("shop","فروشگاه","نمایش پلن‌ها و قیمت‌ها (خرید در ربات انجام میشه)")}${sec("wallet","کیف پول","موجودی و تاریخچه‌ی تراکنش‌ها")}${sec("referral","دعوت دوستان","لینک اختصاصی و آمار زیرمجموعه")}${sec("support","پشتیبانی و آموزش","متن‌های پشتیبانی و آموزش اتصال")}</div></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px"><button class="btn pri" data-a="ssave">${ic("check")}ذخیره</button><button class="btn" data-a="mapply">${ic("refresh")}اعمال دوباره‌ی دکمه‌ی منو در تلگرام</button></div></div>
+  <div><div class="phone"><iframe id="mpv" src="/app#demo" title="پیش‌نمایش مینی‌اپ"></iframe></div>
+  <div class="ptabs">${[["home","خانه"],["services","سرویس‌ها"],["shop","فروشگاه"],["wallet","کیف پول"],["more","بیشتر"]].map(([k,l])=>`<button class="tab" data-a="mtab" data-k="${k}">${l}</button>`).join("")}</div>
+  <p class="pd" style="text-align:center;margin-top:8px;font-size:12px">پیش‌نمایش با داده‌ی نمونه؛ همین‌طور که تغییر میدی زنده عوض میشه.</p></div></div>`;
+  const send=extra=>{const w=$("#mpv").contentWindow;w&&w.postMessage({vpPreview:{accent:ST.mini.accent,title:ST.mini.title,banner:ST.mini.banner,sections:ST.mini.sections,...extra}},location.origin)};
+  $("#mpv").addEventListener("load",()=>setTimeout(()=>send(),700));
+  const read=()=>{const f=formData(el);ST.mini={...ST.mini,enabled:f.enabled,title:f.title,banner:f.banner,sections:{shop:f.s_shop,wallet:f.s_wallet,referral:f.s_referral,support:f.s_support}}};
+  el.oninput=el.onchange=e=>{if(!e.target.closest||!e.target.closest(".mini-grid"))return;read();send()};
+  $$("#swatches [data-acc]",el).forEach(b=>b.onclick=()=>{ST.mini.accent=b.dataset.acc;$$("#swatches .swatch",el).forEach(x=>x.classList.toggle("on",x===b));send()});
+  SAVE=()=>{read();return api("/api/settings",{method:"POST",body:{ui:{miniapp:{enabled:ST.mini.enabled,accent:ST.mini.accent,title:ST.mini.title,banner:ST.mini.banner,sections:ST.mini.sections}}}})};
+  ST.mpvSend=send;
+}
+A.mtab=el=>{ST.mpvSend&&ST.mpvSend({tab:el.dataset.k})};
+A.mcopy=()=>navigator.clipboard.writeText(ST.data.ui.miniapp.url).then(()=>toast("آدرس کپی شد"));
+A.mapply=el=>busy(el,async()=>{await api("/api/miniapp/apply",{method:"POST"});toast("دکمه‌ی منو در تلگرام به‌روز شد")});
 A.wadd=()=>{ST.wheel.push({label:"🎁 جایزه",amount:0,weight:10});drawWheel()};
 A.wdel=el=>{ST.wheel.splice(+el.dataset.i,1);drawWheel()};
 A.rprev=el=>busy(el,async()=>{const f=formData($("#sb"));await api("/api/settings",{method:"POST",body:{rules_preview:true,rules_preview_text:f.rules_text}});toast("برای تلگرام شما ارسال شد")});

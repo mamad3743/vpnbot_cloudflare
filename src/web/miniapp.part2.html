@@ -1,0 +1,295 @@
+<script>
+"use strict";
+const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fa=(n,o)=>Number(n||0).toLocaleString("fa-IR",o);
+const ic=(n,c="")=>`<svg class="ic ${c}"><use href="#i-${n}"/></svg>`;
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const GB=1024**3;
+const fmtGB=b=>{const g=b/GB;return g>=100?fa(Math.round(g)):g>=10?fa(+g.toFixed(1)):fa(+g.toFixed(2))};
+const dayLabel=ts=>{const d=new Date(ts),n=new Date(),a=new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime(),b=new Date(n.getFullYear(),n.getMonth(),n.getDate()).getTime(),k=Math.round((b-a)/864e5);return k===0?"امروز":k===1?"دیروز":d.toLocaleDateString("fa-IR",{day:"numeric",month:"long"})};
+const timeLabel=ts=>new Date(ts).toLocaleTimeString("fa-IR",{hour:"2-digit",minute:"2-digit"});
+const dateFull=ts=>new Date(ts).toLocaleDateString("fa-IR",{year:"numeric",month:"long",day:"numeric"});
+
+/* ============ پل تلگرام ============ */
+let tg=null;
+const hashParams=()=>new URLSearchParams(location.hash.replace(/^#/,"").replace(/^\?/,""));
+const initData=()=>(tg&&tg.initData)||hashParams().get("tgWebAppData")||"";
+const DEMO=/(^|[#&?])demo(=|&|$)/.test(location.hash+location.search);
+async function waitTelegram(){for(let i=0;i<14;i++){if(window.Telegram&&window.Telegram.WebApp){tg=window.Telegram.WebApp;return}await sleep(60)}}
+const hap=(t="light")=>{try{tg&&tg.HapticFeedback&&tg.HapticFeedback.impactOccurred(t)}catch{}};
+const hapOK=()=>{try{tg&&tg.HapticFeedback&&tg.HapticFeedback.notificationOccurred("success")}catch{}};
+function openTg(url){hap();try{if(tg&&tg.openTelegramLink&&/^https:\/\/t\.me\//.test(url))return tg.openTelegramLink(url)}catch{}window.open(url,"_blank")}
+function deep(p){const u=S.data&&S.data.bot&&S.data.bot.username;if(!u)return toast("آدرس ربات پیدا نشد");if(DEMO)return toast("در حالت نمایشی انجام نمیشه");openTg(`https://t.me/${u}?start=${p}`);}
+async function copy(text,msg="کپی شد"){try{await navigator.clipboard.writeText(text)}catch{const t=document.createElement("textarea");t.value=text;t.style.cssText="position:fixed;opacity:0";document.body.append(t);t.select();try{document.execCommand("copy")}catch{}t.remove()}hapOK();toast(msg)}
+let toastT;function toast(m){const t=$("#toast");t.innerHTML=ic("check")+"<span>"+esc(m)+"</span>";t.classList.add("on");clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("on"),2200)}
+
+/* ============ تم ============ */
+function applyTheme(){
+  const dark=tg&&tg.colorScheme?tg.colorScheme==="dark":matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.dataset.theme=dark?"dark":"light";
+  try{const bg=getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();tg&&tg.setHeaderColor&&tg.setHeaderColor(bg);tg&&tg.setBackgroundColor&&tg.setBackgroundColor(bg)}catch{}
+}
+const setAccent=a=>{document.documentElement.dataset.accent=a||"violet"};
+
+/* ============ ابزارهای HTML امن (زیرمجموعه‌ی HTML تلگرام) ============ */
+function safeHtml(src){
+  const ALLOW={B:1,STRONG:1,I:1,EM:1,U:1,S:1,STRIKE:1,DEL:1,CODE:1,PRE:1,BLOCKQUOTE:1,A:1,BR:1};
+  const doc=new DOMParser().parseFromString("<body>"+String(src||"").replace(/\n/g,"<br>")+"</body>","text/html");
+  const walk=n=>{let out="";n.childNodes.forEach(c=>{if(c.nodeType===3)out+=esc(c.nodeValue);else if(c.nodeType===1){const t=c.tagName,inner=walk(c);if(!ALLOW[t])out+=inner;else if(t==="BR")out+="<br>";else if(t==="A"){const h=c.getAttribute("href")||"";out+=/^(https?:\/\/|tg:\/\/)/i.test(h)?`<a href="${esc(h)}" data-ext="1">${inner}</a>`:inner}else out+=`<${t.toLowerCase()}>${inner}</${t.toLowerCase()}>`}});return out};
+  return walk(doc.body);
+}
+
+/* ============ API (و حالت نمایشی) ============ */
+const S={tab:"home",data:null,plans:null,wallet:null,usage:{},wf:"all",cat:0,ready:false};
+async function api(path){
+  if(DEMO)return demoApi(path);
+  const r=await fetch("/app/api"+path,{headers:{Authorization:"tma "+initData()},cache:"no-store"});
+  const j=await r.json().catch(()=>({ok:false,error:"پاسخ نامعتبر"}));
+  if(!r.ok||j.ok===false){const e=new Error(j.error||"خطا");e.status=r.status;e.body=j;throw e}
+  return j;
+}
+const NOW=Date.now();
+async function demoApi(path){
+  await sleep(path.startsWith("/service")?650:300);
+  const q=new URLSearchParams(path.split("?")[1]||"");
+  if(path.startsWith("/bootstrap"))return{ok:true,registered:true,maintenance:{on:false},user:{id:123456789,name:"علی",username:"ali_demo",wallet:1250000,referrals:7,admin:false},app:{title:"تاتا وی‌پی‌ان",accent:document.documentElement.dataset.accent,banner:"🎁 تخفیف ویژه‌ی شب یلدا: ۲۰٪ روی همه‌ی پلن‌های سه‌ماهه",sections:{shop:true,wallet:true,referral:true,support:true}},bot:{username:"demo_bot",name:"تاتا"},percent:10,refLink:"https://t.me/demo_bot?start=123456789",transferEnabled:true,
+    services:[{kind:"o",id:1,title:"ali_premium",product:"پلن ۱۰۰ گیگ سه‌ماهه",live:true,renewable:true,free:false},{kind:"o",id:2,title:"دوستم‌ - ۵۰ گیگ",product:"پلن ۵۰ گیگ یک‌ماهه",live:true,renewable:true,free:false},{kind:"o",id:3,title:"کانفیگ ثابت ایران",product:"کانفیگ تانل",live:false,renewable:false,free:false},{kind:"e",id:4,title:"old_user_77",product:"اشتراک قبلی",live:true,renewable:true,free:false}],
+    texts:{support:"📞 پشتیبانی: @support_demo\n⏰ ساعت پاسخگویی: ۹ تا ۲۱",tutorial:"1️⃣ برنامه‌ی <b>v2rayNG</b> (اندروید) یا <b>Streisand</b> (iOS) رو نصب کن.\n2️⃣ لینک اشتراک رو کپی کن و داخل برنامه Import بزن.\n3️⃣ روی دکمه‌ی اتصال بزن و لذت ببر 🚀"}};
+  if(path.startsWith("/service/qr"))return null;
+  if(path.startsWith("/service")){const id=+q.get("id"),m={1:{total:100*GB,used:38*GB,expire:(NOW+51*864e5)/1000},2:{total:50*GB,used:46.5*GB,expire:(NOW+2*864e5)/1000},4:{total:0,used:12*GB,expire:0}}[id];
+    return{ok:true,kind:q.get("kind"),id,title:{1:"ali_premium",2:"دوستم‌ - ۵۰ گیگ",3:"کانفیگ ثابت ایران",4:"old_user_77"}[id],product:{1:"پلن ۱۰۰ گیگ سه‌ماهه",2:"پلن ۵۰ گیگ یک‌ماهه",3:"کانفیگ تانل",4:"اشتراک قبلی"}[id],free:false,renewable:id!==3,transferable:true,usage:m?{...m,status:"active"}:null,usageErr:false,link:"https://sub.example.com/sub/"+id+"x9Qk2LmPz",isSub:true,qr:true}}
+  if(path.startsWith("/plans"))return{ok:true,best:2,categories:[{id:1,name:"🚀 پرسرعت",count:3},{id:2,name:"🏝 اقتصادی",count:2}],hasOthers:false,items:[
+    {id:1,name:"۳۰ گیگ یک‌ماهه",price:90000,days:30,gb:30,cat:1,desc:"مناسب مصرف روزمره و شبکه‌های اجتماعی",panel:true,custom:null,soldOut:false},
+    {id:2,name:"۱۰۰ گیگ سه‌ماهه",price:240000,days:90,gb:100,cat:1,desc:"پرطرفدارترین؛ مناسب خانواده",panel:true,custom:null,soldOut:false},
+    {id:3,name:"حجم دلخواه",price:20000,days:30,gb:10,cat:1,desc:"حجم و مدت رو خودت انتخاب کن",panel:true,custom:{min_gb:10,max_gb:300,min_days:30,max_days:180,price_per_gb:2500,price_per_day:300},soldOut:false},
+    {id:4,name:"۲۰ گیگ هفتگی",price:45000,days:7,gb:20,cat:2,desc:"برای سفر کوتاه",panel:true,custom:null,soldOut:false},
+    {id:5,name:"کانفیگ ثابت VIP",price:150000,days:30,gb:0,cat:2,desc:"نامحدود با IP ثابت",panel:false,custom:null,soldOut:true}]};
+  if(path.startsWith("/wallet")){const H=36e5,D=864e5;return{ok:true,balance:1250000,items:[
+    {id:9,type:"topup",amount:500000,status:"approved",at:NOW-2*H,name:""},{id:8,type:"purchase",amount:240000,status:"approved",at:NOW-5*H,name:"۱۰۰ گیگ سه‌ماهه"},
+    {id:7,type:"topup",amount:200000,status:"pending",at:NOW-D,name:""},{id:6,type:"renew",amount:90000,status:"approved",at:NOW-D-2*H,name:"۳۰ گیگ یک‌ماهه"},
+    {id:5,type:"purchase",amount:90000,status:"rejected",at:NOW-3*D,name:"۳۰ گیگ یک‌ماهه"},{id:4,type:"topup",amount:1000000,status:"approved",at:NOW-5*D,name:""}]}}
+  return{ok:true};
+}
+
+/* ============ مصرف و وضعیت سرویس ============ */
+function svcState(d){
+  if(!d||!d.usage)return{k:"mut",label:d&&d.usageErr?"نامشخص":"…",pct:1,left:null,days:null,unlimited:!d,c1:"var(--a1)",c2:"var(--a2)"};
+  const u=d.usage,now=Date.now(),exp=u.expire?u.expire*1000:0,total=u.total||0,left=total?Math.max(0,total-u.used):null,pct=total?left/total:1,days=exp?Math.ceil((exp-now)/864e5):null;
+  let k="ok",label="فعال";
+  if(u.status&&!["active","on_hold",""].includes(u.status)){k="bad";label=u.status==="expired"?"منقضی":u.status==="limited"?"حجم تمام":"غیرفعال"}
+  else if((exp&&exp<now)){k="bad";label="منقضی"}
+  else if(total&&left<=0){k="bad";label="حجم تمام"}
+  else if((total&&pct<.15)||(days!==null&&days<=3)){k="warn";label="رو به اتمام"}
+  const col={ok:["var(--a1)","var(--a2)"],warn:["#f59e0b","#fcd34d"],bad:["#f43f5e","#fb7185"],mut:["var(--a1)","var(--a2)"]}[k];
+  return{k,label,pct:k==="bad"&&!total?0:pct,left,days,unlimited:!total,c1:col[0],c2:col[1],total,used:u.used,exp};
+}
+let ringId=0;
+function ring(pct,c1,c2,center){
+  const id="rg"+(++ringId),r=42,C=2*Math.PI*r;
+  return `<svg viewBox="0 0 100 100"><defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient></defs><circle class="trk" cx="50" cy="50" r="${r}"/><circle class="prg" cx="50" cy="50" r="${r}" stroke="url(#${id})" stroke-dasharray="${C}" stroke-dashoffset="${C}" data-c="${C}" data-pct="${Math.max(0.02,Math.min(1,pct))}"/></svg>${center||""}`;
+}
+function animateRings(root=document){requestAnimationFrame(()=>requestAnimationFrame(()=>{$$(".prg[data-pct]",root).forEach(c=>{c.style.strokeDashoffset=(+c.dataset.c)*(1-(+c.dataset.pct))});$$(".bar>i[data-w]",root).forEach(b=>{b.style.width=b.dataset.w+"%"})}))}
+const key=s=>s.kind+":"+s.id;
+
+function svcCard(sv,i=0,compact=false){
+  const d=S.usage[key(sv)],st=svcState(d),loading=sv.live&&!d;
+  let body;
+  if(!sv.live)body=`<div class="body"><div class="ringbox" style="display:grid;place-items:center;color:var(--a2)">${ic("link","")}</div><div class="facts" style="grid-template-columns:1fr"><div class="fact"><small>نوع سرویس</small><b>کانفیگ دستی</b></div><div class="fact"><small>مشاهده‌ی لینک</small><b>ضربه بزن ←</b></div></div></div>`;
+  else if(loading)body=`<div class="body"><div class="ringbox"><div class="skl" style="width:86px;height:86px;border-radius:50%"></div></div><div class="facts"><div class="skl" style="height:46px"></div><div class="skl" style="height:46px"></div><div class="skl" style="height:46px"></div><div class="skl" style="height:46px"></div></div></div>`;
+  else if(!d.usage)body=`<div class="body"><div class="ringbox" style="display:grid;place-items:center;color:var(--warn)">${ic("clock")}</div><div class="facts" style="grid-template-columns:1fr"><div class="fact"><small>وضعیت</small><b>اطلاعات مصرف در دسترس نیست</b></div></div></div>`;
+  else body=`<div class="body"><div class="ringbox">${ring(st.pct,st.c1,st.c2,`<div class="c"><b class="num">${st.unlimited?ic("infinity"):fa(Math.round(st.pct*100))+"٪"}</b><small>${st.unlimited?"نامحدود":"باقی‌مانده"}</small></div>`)}</div>
+    <div class="facts"><div class="fact"><small>حجم باقی</small><b class="num">${st.unlimited?"نامحدود":fmtGB(st.left)+" گیگ"}</b></div><div class="fact hc"><small>مصرف‌شده</small><b class="num">${fmtGB(st.used)} گیگ</b></div><div class="fact" style="grid-column:1/-1"><small>زمان باقی‌مانده</small><b class="num">${st.days===null?"نامحدود":st.days<=0?"تمام شده":fa(st.days)+" روز"}</b></div></div></div>`;
+  return `<div class="card svc ${compact?"compact":""}" data-act="svc" data-k="${key(sv)}" style="--i:${i};--c1:${st.c1};--c2:${st.c2}"><div class="hd"><div class="t"><b>${esc(sv.title)}</b><small>${esc(sv.product||"")}</small></div><span class="pillst st-${st.k}">${esc(sv.live?(loading?"…":st.label):"فعال")}</span></div>${body}</div>`;
+}
+
+/* ============ نماها ============ */
+const app=()=>$("#app");
+function header(){const u=S.data.user,a=S.data.app;return `<div class="top"><div class="logo">${ic("bot")}</div><div class="ttl"><b>${esc(a.title||"مینی‌اپ")}</b><small><span class="dot"></span>آنلاین</small></div><div class="avatar">${esc((u.name||"؟").trim().charAt(0).toUpperCase())}</div></div>`}
+const emptyBox=(icn,t,s,btn="")=>`<div class="empty"><div class="big">${ic(icn)}</div><b>${t}</b><div>${s}</div>${btn}</div>`;
+
+function viewHome(){
+  const D=S.data,u=D.user,a=D.app,svs=D.services;
+  const acts=[["shop","bag","خرید"],["svcs","refresh","تمدید"],["ref","gift","دعوت"],["help","help","پشتیبانی"]];
+  return `<div class="view stagger">${header()}
+  <div style="--i:0"><h1 style="font-size:20px;font-weight:900;margin:2px 2px 2px">سلام ${esc(u.name||"دوست عزیز")} 👋</h1><div style="color:var(--mut);margin:0 2px 14px">خوش اومدی؛ همه‌چیز اینجا دم‌دسته.</div></div>
+  ${a.banner?`<div class="banner" style="--i:1">${ic("spark")}<span>${esc(a.banner)}</span></div>`:""}
+  ${a.sections.wallet?`<div class="card bal" style="--i:2"><small>${ic("wallet")}موجودی کیف پول</small><div class="amt"><b data-count="${u.wallet}" class="num">${fa(u.wallet)}</b><span>تومان</span></div><div class="row"><button class="chipbtn solid" data-act="topup">${ic("plus")}شارژ کیف پول</button><button class="chipbtn" data-act="tab" data-t="wallet">${ic("clock")}تاریخچه</button></div></div>`:""}
+  <div class="qa" style="--i:3">${acts.filter(x=>!(x[0]==="shop"&&!a.sections.shop)&&!(x[0]==="ref"&&!a.sections.referral)&&!(x[0]==="help"&&!a.sections.support)).map(x=>`<button data-act="qa" data-q="${x[0]}"><span class="ico">${ic(x[1])}</span>${x[2]}</button>`).join("")}</div>
+  <h2 class="sec" style="--i:4">${ic("box")}سرویس‌های من${svs.length?`<button data-act="tab" data-t="services">همه ${ic("left")}</button>`:""}</h2>
+  ${svs.length?`<div class="hscroll" style="--i:5">${svs.slice(0,6).map(s=>svcCard(s,0,true)).join("")}</div>`:`<div class="card" style="--i:5">${emptyBox("box","هنوز سرویسی نداری","اولین سرویس رو بخر و همین‌جا مصرفش رو زنده ببین.",a.sections.shop?`<button class="btn pri" style="margin-top:14px" data-act="tab" data-t="shop">${ic("bag")}مشاهده‌ی پلن‌ها</button>`:"")}</div>`}
+  </div>`;
+}
+function viewServices(){
+  const svs=S.data.services;
+  return `<div class="view stagger">${header()}<h2 class="sec" style="--i:0;margin-top:4px">${ic("box")}سرویس‌های من<button data-act="reload">${ic("refresh")}به‌روزرسانی</button></h2>
+  ${svs.length?svs.map((s,i)=>svcCard(s,i+1)).join('<div style="height:12px"></div>'):`<div class="card" style="--i:1">${emptyBox("box","سرویسی پیدا نشد","بعد از خرید، سرویس‌هات اینجا نمایش داده میشن.")}</div>`}</div>`;
+}
+function planCard(p,i){
+  const best=S.plans.best===p.id&&!p.soldOut;
+  if(p.custom){const c=p.custom;return `<div class="card plan calc" style="--i:${i}" data-cid="${p.id}"><div class="nm">${esc(p.name)}</div><div class="ds">${esc(p.desc||"حجم و مدت رو خودت تعیین کن؛ قیمت لحظه‌ای حساب میشه.")}</div>
+    <div class="row"><div class="lab"><span>حجم</span><em class="num" data-v="gb">${fa(c.min_gb)} گیگ</em></div><input type="range" data-r="gb" min="${c.min_gb}" max="${c.max_gb}" step="${c.max_gb-c.min_gb>200?5:1}" value="${c.min_gb}"></div>
+    <div class="row"><div class="lab"><span>مدت</span><em class="num" data-v="days">${fa(c.min_days)} روز</em></div><input type="range" data-r="days" min="${c.min_days}" max="${c.max_days}" step="1" value="${c.min_days}"></div>
+    <div class="pr"><b class="num" data-v="price">${fa(Math.round(c.min_gb*c.price_per_gb+c.min_days*c.price_per_day))}</b><span>تومان</span></div>
+    <button class="btn pri block" data-act="buy" data-id="${p.id}">${ic("zap")}ادامه در ربات</button></div>`}
+  return `<div class="card plan ${best?"best":""} ${p.soldOut?"sold":""}" style="--i:${i}">${best?`<div class="badge">🔥 پرفروش</div>`:""}<div class="nm">${esc(p.name)}</div><div class="ds">${esc(p.desc||"")}</div>
+    <div class="meta"><span class="mp">${ic("clock")}${fa(p.days)} روز</span><span class="mp">${ic("zap")}${p.gb?fa(p.gb)+" گیگ":"نامحدود"}</span>${p.panel?`<span class="mp">${ic("check")}تحویل آنی</span>`:""}</div>
+    <div class="pr"><b class="num">${fa(p.price)}</b><span>تومان</span></div>
+    <button class="btn pri block" data-act="buy" data-id="${p.id}" ${p.soldOut?"disabled":""}>${p.soldOut?"موجودی تمام شده":ic("bag")+"خرید"}</button></div>`;
+}
+function viewShop(){
+  const P=S.plans;
+  if(!P)return `<div class="view">${header()}<div class="skl" style="height:44px;margin-bottom:14px"></div>${[1,2,3].map(()=>`<div class="skl" style="height:210px;margin-bottom:14px;border-radius:22px"></div>`).join("")}</div>`;
+  const cats=[{id:0,name:"همه"},...P.categories,...(P.hasOthers&&P.categories.length?[{id:-1,name:"سایر"}]:[])];
+  const items=P.items.filter(p=>S.cat===0||(S.cat===-1?p.cat===0:p.cat===S.cat));
+  return `<div class="view">${header()}${cats.length>2?`<div class="cats">${cats.map(c=>`<button class="cat ${S.cat===c.id?"on":""}" data-act="cat" data-id="${c.id}">${esc(c.name)}</button>`).join("")}</div>`:""}
+  <div class="stagger">${items.length?items.map((p,i)=>planCard(p,i)).join(""):`<div class="card">${emptyBox("bag","پلنی موجود نیست","به‌زودی پلن‌های جدید اضافه میشن.")}</div>`}</div></div>`;
+}
+const TXT={topup:["شارژ کیف پول","in","arrow-in"],purchase:["خرید","out","bag"],renew:["تمدید","rn","refresh"]};
+function viewWallet(){
+  const W=S.wallet;
+  const bal=`<div class="card bal"><small>${ic("wallet")}موجودی قابل استفاده</small><div class="amt"><b class="num" data-count="${W?W.balance:S.data.user.wallet}">${fa(W?W.balance:S.data.user.wallet)}</b><span>تومان</span></div><div class="row"><button class="chipbtn solid" data-act="topup">${ic("plus")}شارژ کیف پول</button></div></div>`;
+  if(!W)return `<div class="view">${header()}${bal}<div class="skl" style="height:60px;margin-top:16px"></div><div class="skl" style="height:60px;margin-top:10px"></div><div class="skl" style="height:60px;margin-top:10px"></div></div>`;
+  const items=W.items.filter(x=>S.wf==="all"||(S.wf==="in"?x.type==="topup":x.type!=="topup"));
+  let last="",list="";
+  items.forEach((x,i)=>{const dl=dayLabel(x.at);if(dl!==last){list+=`<div class="dayh">${dl}</div>`;last=dl}
+    const t=TXT[x.type]||["تراکنش","out","bag"],pend=["pending","awaiting_receipt"].includes(x.status),rej=x.status==="rejected";
+    list+=`<div class="tx ${t[1]}" style="--i:${Math.min(i,10)}"><div class="i">${ic(t[2])}</div><div class="m"><b>${esc(t[0])}${x.name?" "+esc(x.name):""}</b><small>${timeLabel(x.at)}</small></div><div class="a num">${x.type==="topup"?"+":"−"}${fa(x.amount)}<small class="pillst ${rej?"st-bad":pend?"st-warn":"st-mut"}" style="display:inline-block;margin-top:2px">${rej?"رد شده":pend?"در انتظار تایید":x.type==="topup"?"واریز شد":"پرداخت شد"}</small></div></div>`});
+  return `<div class="view">${header()}<div class="stagger"><div style="--i:0">${bal}</div>
+  <div class="presets" style="--i:1">${[50000,100000,200000,500000].map(a=>`<button class="preset" data-act="topup"><span class="num">${fa(a)}</span><small>تومان</small></button>`).join("")}</div>
+  <div class="seg" style="--i:2">${[["all","همه"],["in","شارژ"],["out","خرید و تمدید"]].map(x=>`<button class="${S.wf===x[0]?"on":""}" data-act="wf" data-f="${x[0]}">${x[1]}</button>`).join("")}</div></div>
+  ${items.length?`<div class="stagger">${list}</div>`:`<div class="card">${emptyBox("wallet","تراکنشی ثبت نشده","بعد از اولین شارژ یا خرید اینجا می‌بینی.")}</div>`}</div>`;
+}
+function viewMore(){
+  const D=S.data,u=D.user,a=D.app;let h=`<div class="view stagger">${header()}`;
+  if(a.sections.referral)h+=`<div class="card ref" id="refcard" style="--i:0"><h3 style="font-size:16px;font-weight:900;margin-bottom:4px">${ic("gift")} دعوت دوستان</h3><div style="color:var(--mut);font-size:13px">دوستانت رو با لینک اختصاصی‌ات دعوت کن؛ پورسانت زیرمجموعه‌گیری: <b class="num" style="color:var(--a2)">${fa(D.percent)}٪</b></div>
+    <div class="linkbox"><code>${esc(D.refLink||"—")}</code><button class="btn sm" data-act="copyref">${ic("copy")}کپی</button></div>
+    <div style="display:flex;gap:10px"><button class="btn pri" style="flex:1" data-act="shareref">${ic("share")}ارسال برای دوستان</button></div>
+    <div class="stats" style="margin-top:14px"><div class="stat"><b class="num">${fa(u.referrals)}</b><small>زیرمجموعه</small></div><div class="stat"><b class="num">${fa(D.percent)}٪</b><small>درصد پورسانت</small></div></div></div>`;
+  if(a.sections.support&&D.texts&&D.texts.support)h+=`<h2 class="sec" id="helpsec" style="--i:1">${ic("help")}پشتیبانی</h2><div class="card pad txt" style="--i:2">${safeHtml(D.texts.support)}</div>`;
+  if(a.sections.support&&D.texts&&D.texts.tutorial)h+=`<h2 class="sec" style="--i:3">${ic("book")}آموزش اتصال</h2><div class="card pad txt" style="--i:4">${safeHtml(D.texts.tutorial)}</div>`;
+  h+=`<h2 class="sec" style="--i:5">${ic("shield")}درباره</h2><div class="list" style="--i:6"><button class="row2" data-act="copyid"><span class="i">${ic("users")}</span><span class="m"><b>شناسه‌ی عددی شما</b><small class="num ltr">${u.id}</small></span>${ic("copy")}</button>
+  <button class="row2" data-act="openbot"><span class="i">${ic("bot")}</span><span class="m"><b>بازگشت به ربات</b><small>@${esc((D.bot&&D.bot.username)||"")}</small></span>${ic("left")}</button></div></div>`;
+  return h;
+}
+
+/* ============ رندر و تب‌ها ============ */
+const VIEWS={home:viewHome,services:viewServices,shop:viewShop,wallet:viewWallet,more:viewMore};
+function tabsDef(){const s=S.data.app.sections;return[["home","home","خانه"],["services","box","سرویس‌ها"],...(s.shop?[["shop","bag","فروشگاه"]]:[]),...(s.wallet?[["wallet","wallet","کیف پول"]]:[]),["more","grid","بیشتر"]]}
+function buildTabs(){const t=$("#tabs");t.hidden=false;t.innerHTML=`<span class="ind"></span>`+tabsDef().map(x=>`<button data-act="tab" data-t="${x[0]}" class="${S.tab===x[0]?"on":""}">${ic(x[1])}<span>${x[2]}</span></button>`).join("");moveInd()}
+function moveInd(){const t=$("#tabs"),on=$("button.on",t),ind=$(".ind",t);if(!on||!ind)return;const a=t.getBoundingClientRect(),b=on.getBoundingClientRect();ind.style.width=b.width+"px";ind.style.transform=`translateX(${b.left-a.left-1}px)`}
+function render(){
+  app().innerHTML=VIEWS[S.tab]();
+  buildTabs();animateRings(app());wire();
+  $$("[data-count]",app()).forEach(el=>countUp(el,+el.dataset.count));
+}
+function countUp(el,to){const t0=performance.now(),dur=900;const f=n=>{const p=Math.min(1,(n-t0)/dur),e=1-Math.pow(1-p,3);el.textContent=fa(Math.round(to*e));if(p<1)requestAnimationFrame(f)};requestAnimationFrame(f)}
+function wire(){
+  $$("[data-cid]",app()).forEach(card=>{const p=S.plans.items.find(x=>x.id==card.dataset.cid),c=p.custom,g=$('[data-r="gb"]',card),d=$('[data-r="days"]',card);
+    const upd=()=>{[g,d].forEach(r=>r.style.setProperty("--p",((r.value-r.min)/(r.max-r.min)*100)+"%"));$('[data-v="gb"]',card).textContent=fa(g.value)+" گیگ";$('[data-v="days"]',card).textContent=fa(d.value)+" روز";$('[data-v="price"]',card).textContent=fa(Math.round(g.value*c.price_per_gb+d.value*c.price_per_day))};
+    [g,d].forEach(r=>r.addEventListener("input",()=>{upd();if(performance.now()-(card._h||0)>90){card._h=performance.now();hap("light")}}));upd()});
+}
+async function setTab(t){
+  if(t===S.tab&&!S.ready)return;hap();S.tab=t;window.scrollTo({top:0,behavior:"smooth"});render();
+  if(t==="shop"&&!S.plans){try{S.plans=await api("/plans")}catch(e){S.plans={items:[],categories:[],hasOthers:false}}if(S.tab==="shop")render()}
+  if(t==="wallet"&&!S.wallet){try{S.wallet=await api("/wallet")}catch{S.wallet={balance:S.data.user.wallet,items:[]}}if(S.tab==="wallet")render()}
+}
+
+/* ============ شیت‌ها ============ */
+let sheetOpen=false;
+function openSheet(html){$("#sheet").innerHTML=`<div class="grab" id="grab"></div>`+html;$("#sheetroot").classList.add("open");sheetOpen=true;
+  try{tg&&tg.BackButton&&(tg.BackButton.show(),tg.BackButton.onClick(closeSheet))}catch{}
+  const g=$("#grab"),sh=$("#sheet");let y0=null,dy=0;
+  g.addEventListener("touchstart",e=>{y0=e.touches[0].clientY;sh.style.transition="none"},{passive:true});
+  g.addEventListener("touchmove",e=>{dy=Math.max(0,e.touches[0].clientY-y0);sh.style.transform=`translateY(${dy}px)`},{passive:true});
+  g.addEventListener("touchend",()=>{sh.style.transition="";sh.style.transform="";if(dy>110)closeSheet();dy=0});
+  animateRings($("#sheet"))}
+function closeSheet(){if(!sheetOpen)return;$("#sheetroot").classList.remove("open");sheetOpen=false;try{tg&&tg.BackButton&&(tg.BackButton.hide(),tg.BackButton.offClick(closeSheet))}catch{}}
+async function openService(k){
+  const [kind,id]=k.split(":"),sv=S.data.services.find(s=>key(s)===k);hap();
+  openSheet(`<h3>${esc(sv.title)}</h3><div style="color:var(--mut);font-size:12.5px">${esc(sv.product||"")}</div><div class="skl" style="height:170px;width:170px;border-radius:50%;margin:20px auto"></div><div class="skl" style="height:60px;margin:10px 0"></div><div class="skl" style="height:46px"></div>`);
+  let d;try{d=await api(`/service?kind=${kind}&id=${id}`)}catch(e){closeSheet();return toast(e.message||"خطا")}
+  S.usage[k]=d;if(S.tab==="home"||S.tab==="services")repaintSvc(k);
+  if(!sheetOpen)return;
+  const st=svcState(d);
+  const big=d.usage?`<div class="bigring">${ring(st.pct,st.c1,st.c2,`<div class="c"><b class="num">${st.unlimited?ic("infinity"):fa(Math.round(st.pct*100))+"٪"}</b><small>${st.unlimited?"حجم نامحدود":"باقی‌مانده"}</small></div>`)}</div>
+    <div style="text-align:center"><span class="pillst st-${st.k}">${esc(st.label)}</span></div>
+    <div class="grid4"><div class="fact"><small>حجم کل</small><b class="num">${st.unlimited?"نامحدود":fmtGB(st.total)+" گیگ"}</b></div><div class="fact"><small>مصرف‌شده</small><b class="num">${fmtGB(st.used)} گیگ</b></div><div class="fact"><small>باقی‌مانده</small><b class="num">${st.unlimited?"نامحدود":fmtGB(st.left)+" گیگ"}</b></div><div class="fact"><small>انقضا</small><b class="num">${st.exp?dateFull(st.exp):"نامحدود"}</b></div></div>`
+    :`<div class="card pad" style="margin:14px 0;text-align:center;color:var(--mut)">${d.usageErr?"الان نتونستم مصرف سرویس رو از پنل بگیرم؛ کمی بعد دوباره امتحان کن.":"این سرویس اطلاعات مصرف ندارد."}</div>`;
+  const link=d.link?`<div class="linkbox"><code>${esc(d.link)}</code><button class="btn sm" data-act="copylink">${ic("copy")}کپی</button></div>`:"";
+  const acts=`<div class="acts">${d.qr?`<button class="btn" data-act="qr" data-k="${k}">${ic("qr")}نمایش QR</button>`:""}${d.renewable?`<button class="btn pri" data-act="renew" data-k="${k}">${ic("refresh")}تمدید سرویس</button>`:""}${d.transferable&&S.data.transferEnabled?`<button class="btn" data-act="xfer" data-k="${k}">${ic("send")}انتقال</button>`:""}${S.data.app.sections.support?`<button class="btn" data-act="howto">${ic("book")}آموزش اتصال</button>`:""}<button class="btn full" data-act="closesheet">بستن</button></div>`;
+  $("#sheet").innerHTML=`<div class="grab" id="grab"></div><h3>${esc(d.title)}</h3><div style="color:var(--mut);font-size:12.5px">${esc(d.product||"")}</div>${big}${link}${acts}`;
+  $("#sheet").dataset.link=d.link||"";animateRings($("#sheet"));
+  const g=$("#grab"),sh=$("#sheet");let y0=null,dy=0;g.addEventListener("touchstart",e=>{y0=e.touches[0].clientY;sh.style.transition="none"},{passive:true});g.addEventListener("touchmove",e=>{dy=Math.max(0,e.touches[0].clientY-y0);sh.style.transform=`translateY(${dy}px)`},{passive:true});g.addEventListener("touchend",()=>{sh.style.transition="";sh.style.transform="";if(dy>110)closeSheet();dy=0});
+}
+async function showQR(k){
+  const [kind,id]=k.split(":");hap();
+  $("#sheet").innerHTML=`<div class="grab"></div><h3 style="text-align:center">QR کد اشتراک</h3><div class="qrbox"><div class="skl" style="aspect-ratio:1"></div></div>`;
+  try{let src;if(DEMO){src="data:image/svg+xml;utf8,"+encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 29 29' shape-rendering='crispEdges'><rect width='29' height='29' fill='white'/>${Array.from({length:29*29},(_,i)=>{const x=i%29,y=Math.floor(i/29),f=(x<8&&y<8)||(x>20&&y<8)||(x<8&&y>20);const on=f?((x%7===0||y%7===0||x%7===6||y%7===6||(x%7>1&&x%7<5&&y%7>1&&y%7<5))):((x*7+y*13+x*y)%5<2);return on?`<rect x='${x}' y='${y}' width='1' height='1'/>`:""}).join("")}</svg>`)}
+    else{const r=await fetch(`/app/api/service/qr?kind=${kind}&id=${id}`,{headers:{Authorization:"tma "+initData()}});if(!r.ok)throw new Error("QR در دسترس نیست");src=URL.createObjectURL(await r.blob())}
+    $("#sheet").innerHTML=`<div class="grab"></div><h3 style="text-align:center">QR کد اشتراک</h3><div style="text-align:center;color:var(--mut);font-size:12.5px">با برنامه‌ی کلاینت اسکن کن</div><div class="qrbox"><img alt="QR" src="${src}"></div><div class="acts"><button class="btn full" data-act="svc" data-k="${k}">بازگشت</button></div>`}
+  catch(e){toast(e.message||"خطا");openService(k)}
+}
+function repaintSvc(k){const sv=S.data.services.find(s=>key(s)===k);if(!sv)return;$$(`.svc[data-k="${k}"]`).forEach(el=>{const t=document.createElement("div");t.innerHTML=svcCard(sv,0,el.classList.contains("compact"));const n=t.firstElementChild;n.style.animation="none";n.style.opacity="1";el.replaceWith(n)});animateRings(app())}
+
+/* ============ اکشن‌ها ============ */
+const ACT={
+  tab:el=>setTab(el.dataset.t),
+  svc:el=>openService(el.dataset.k),
+  qa:el=>{const q=el.dataset.q;if(q==="shop")setTab("shop");else if(q==="svcs")setTab("services");else{setTab("more").then(()=>{const t=q==="ref"?$("#refcard"):$("#helpsec");t&&t.scrollIntoView({behavior:"smooth",block:"center"})})}},
+  topup:()=>deep("topup"),
+  buy:el=>deep("p_"+el.dataset.id),
+  renew:el=>{const [kind,id]=el.dataset.k.split(":");deep(kind==="o"?"renew_"+id:"svc_e_"+id)},
+  xfer:el=>{const [kind,id]=el.dataset.k.split(":");deep(`svc_${kind}_${id}`)},
+  howto:()=>{closeSheet();setTab("more").then(()=>setTimeout(()=>{const h=$("#helpsec");h&&h.scrollIntoView({behavior:"smooth"})},300))},
+  cat:el=>{hap();S.cat=+el.dataset.id;render()},
+  wf:el=>{hap();S.wf=el.dataset.f;render()},
+  reload:async()=>{hap();S.usage={};render();loadUsage()},
+  copyref:()=>copy(S.data.refLink,"لینک دعوت کپی شد"),
+  shareref:()=>{const u="https://t.me/share/url?url="+encodeURIComponent(S.data.refLink)+"&text="+encodeURIComponent("با این لینک عضو ربات بشو 🚀");if(DEMO)return toast("در حالت نمایشی انجام نمیشه");openTg(u)},
+  copyid:()=>copy(String(S.data.user.id),"شناسه کپی شد"),
+  openbot:()=>{if(DEMO)return toast("در حالت نمایشی انجام نمیشه");try{tg&&tg.close&&tg.close()}catch{}},
+  copylink:()=>copy($("#sheet").dataset.link,"لینک اشتراک کپی شد"),
+  qr:el=>showQR(el.dataset.k),
+  closesheet:closeSheet,
+};
+document.addEventListener("click",e=>{
+  if(e.target.id==="scrim"){closeSheet();return}
+  const a=e.target.closest("a[data-ext]");if(a){e.preventDefault();openTg(a.getAttribute("href"));return}
+  const el=e.target.closest("[data-act]");if(el&&ACT[el.dataset.act]){e.preventDefault();ACT[el.dataset.act](el)}
+});
+window.addEventListener("resize",moveInd);
+
+/* ============ بارگذاری ============ */
+async function loadUsage(){
+  const list=S.data.services.filter(s=>s.live&&!S.usage[key(s)]);let i=0;
+  const worker=async()=>{while(i<list.length&&i<14){const sv=list[i++];try{S.usage[key(sv)]=await api(`/service?kind=${sv.kind}&id=${sv.id}`)}catch{S.usage[key(sv)]={usage:null,usageErr:true}}repaintSvc(key(sv))}};
+  await Promise.all([worker(),worker(),worker()]);
+}
+function fullState(icn,title,text,btn=""){$("#tabs").hidden=true;app().innerHTML=`<div class="fs view"><div class="big">${ic(icn)}</div><h1>${title}</h1><p>${text}</p>${btn}</div>`}
+async function boot(){
+  applyTheme();
+  app().innerHTML=`<div class="top"><div class="skl" style="width:44px;height:44px;border-radius:15px"></div><div class="skl" style="flex:1;height:36px"></div></div><div class="skl" style="height:150px;border-radius:22px;margin-bottom:14px"></div><div class="skl" style="height:90px;border-radius:22px;margin-bottom:14px"></div><div class="skl" style="height:170px;border-radius:22px"></div>`;
+  await waitTelegram();
+  if(tg){try{tg.ready();tg.expand();tg.onEvent&&tg.onEvent("themeChanged",()=>{applyTheme();moveInd()})}catch{}applyTheme()}
+  if(!DEMO&&!initData())return fullState("bot","فقط داخل تلگرام","این مینی‌اپ رو از داخل ربات (دکمه‌ی «📱 مینی‌اپ») باز کن.");
+  let b;
+  try{b=await api("/bootstrap")}
+  catch(e){
+    if(e.status===403&&e.body&&e.body.disabled)return fullState("tool","مینی‌اپ فعلا غیرفعاله","مدیر ربات این بخش رو موقتا بسته. از داخل ربات ادامه بده.");
+    if(e.status===403&&e.body&&e.body.banned)return fullState("shield","دسترسی مسدوده","حساب شما اجازه‌ی استفاده از ربات رو نداره.");
+    if(e.status===401)return fullState("shield","نشست منقضی شده","مینی‌اپ رو ببند و دوباره از داخل ربات باز کن.");
+    return fullState("tool","خطا در بارگذاری",esc(e.message||"دوباره امتحان کن"),`<button class="btn pri" onclick="location.reload()">${ic("refresh")}تلاش دوباره</button>`);
+  }
+  if(b.app)setAccent(b.app.accent);
+  if(b.maintenance&&b.maintenance.on)return fullState("tool","ربات موقتا خاموشه",esc(b.maintenance.text||"در حال به‌روزرسانی هستیم؛ کمی بعد برگرد."));
+  if(b.registered===false)return fullState("bot","اول ربات رو استارت کن","برای استفاده از مینی‌اپ باید حداقل یک‌بار ربات رو استارت کرده باشی.",b.bot&&b.bot.username?`<button class="btn pri" onclick="window.Telegram&&Telegram.WebApp?Telegram.WebApp.openTelegramLink('https://t.me/${esc(b.bot.username)}?start=1'):window.open('https://t.me/${esc(b.bot.username)}')">${ic("send")}باز کردن ربات</button>`:"");
+  S.data=b;S.ready=true;render();loadUsage();
+  if(b.user&&b.user.admin&&b.maintenance&&b.maintenance.text===undefined){}
+}
+// پیش‌نمایش زنده داخل پنل مدیریت (فقط حالت نمایشی)
+window.addEventListener("message",e=>{if(!DEMO||e.origin!==location.origin||!e.data||!e.data.vpPreview||!S.data)return;const p=e.data.vpPreview;if(p.accent)setAccent(p.accent);if(p.title!==undefined)S.data.app.title=p.title||"مینی‌اپ";if(p.banner!==undefined)S.data.app.banner=p.banner;if(p.sections)S.data.app.sections={...S.data.app.sections,...p.sections};if(p.tab&&VIEWS[p.tab]){if(p.tab==="shop"&&!S.plans)api("/plans").then(x=>{S.plans=x;S.tab="shop";render()});else if(p.tab==="wallet"&&!S.wallet)api("/wallet").then(x=>{S.wallet=x;S.tab="wallet";render()});else{S.tab=p.tab;render()}}else render()});
+boot();
+</script>
+</body>
+</html>

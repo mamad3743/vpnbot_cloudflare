@@ -71,6 +71,7 @@ function shell(){
     <div class="side-foot"><span>${ME.user?"ورود از تلگرام":"ورود با رمز"}</span><button class="btn sm" data-a="logout">${ic("out")}خروج</button></div></aside>
   <div class="main"><header class="top"><button class="btn ico menu-btn" data-a="nav" aria-label="منو">${ic("menu")}</button>
     <div class="pills"><span class="pill">${ME.kv?"KV فعال":"بدون KV"}</span><span class="pill hide-m">نرخ کش تنظیمات: <b class="num" id="hr">—</b></span></div><div class="sp"></div>
+    <button class="power ${ME.botOn!==false?"on":"off"}" id="pwr" data-a="botpower" aria-label="خاموش یا روشن کردن ربات"><span class="tg"></span><span id="pwt">${ME.botOn!==false?"ربات روشنه":"ربات خاموشه"}</span></button>
     <button class="btn amb2" data-a="quickbackup">${ic("down")}<span class="hide-m">بکاپ سریع</span></button></header>
   <main id="view"></main></div></div>`;
 }
@@ -92,6 +93,14 @@ A.nav=()=>document.body.classList.toggle("nav");
 A.go=el=>{document.body.classList.remove("nav");const h="#/"+el.dataset.k;if(location.hash===h)route();else location.hash=h};
 A.logout=async()=>{await api("/api/logout",{method:"POST"}).catch(()=>{});ME=null;boot()};
 A.quickbackup=el=>busy(el,downloadBackup);
+function updatePower(){const b=$("#pwr");if(!b)return;const on=ME.botOn!==false;b.className="power "+(on?"on":"off");$("#pwt").textContent=on?"ربات روشنه":"ربات خاموشه"}
+A.botpower=()=>{
+  const on=ME.botOn!==false;
+  const m=openModal(on?"خاموش‌کردن ربات":"روشن‌کردن ربات",on
+    ?`<p style="margin-bottom:12px">با خاموش‌کردن، ربات برای <b>کاربرها</b> جواب نمیده و فقط پیام زیر رو می‌بینن. <b>ادمین‌ها</b> و همین پنل عادی کار می‌کنن. مینی‌اپ هم برای کاربرها «خاموشه» نشون میده.</p>${field("پیام برای کاربرها",`<textarea name="text" placeholder="${esc("🛠 ربات موقتا در حال به‌روزرسانیه. کمی بعد دوباره امتحان کن.")}">${esc(ME.botOffText||"")}</textarea>`,"خالی = پیام پیش‌فرض (حداکثر هر ۵ دقیقه یک‌بار به هر کاربر فرستاده میشه)")}`
+    :`<p>ربات دوباره برای همه‌ی کاربرها جواب میده.</p>`,
+    [{t:on?ic("x")+"خاموش کن":ic("check")+"روشن کن",c:on?"bad":"ok",f:async c=>{const f=formData(m.root);await api("/api/bot/power",{method:"POST",body:{enabled:!on,...(on?{text:f.text}:{})}});ME.botOn=!on;if(on)ME.botOffText=f.text;updatePower();c();toast(on?"ربات خاموش شد":"ربات روشن شد");if((location.hash||"").includes("dashboard")||!location.hash)route()}},{t:"انصراف",f:()=>{}}]);
+};
 
 /* ============ داشبورد ============ */
 function smooth(p,lo=0,hi=240){const k=y=>Math.min(hi,Math.max(lo,y));let d=`M${p[0][0]},${p[0][1]}`;for(let i=0;i<p.length-1;i++){const a=p[i-1]||p[i],b=p[i],c=p[i+1],e=p[i+2]||c;d+=` C${b[0]+(c[0]-a[0])/6},${k(b[1]+(c[1]-a[1])/6)} ${c[0]-(e[0]-b[0])/6},${k(c[1]-(e[1]-b[1])/6)} ${c[0]},${c[1]}`}return d}
@@ -129,7 +138,7 @@ function usageRings(u){
 PAGES.dashboard=async v=>{
   const o=await api("/api/overview");const U=o.users,O=o.orders;
   const pb=$("#pb");if(pb){pb.hidden=!O.pending;pb.textContent=fa(O.pending)}
-  v.innerHTML=head("داشبورد","وضعیت لحظه‌ای فروش، کاربران و منابع",`<button class="btn" data-a="refresh">${ic("refresh")}به‌روزرسانی</button>`)+`
+  v.innerHTML=head("داشبورد","وضعیت لحظه‌ای فروش، کاربران و منابع",`<button class="btn" data-a="refresh">${ic("refresh")}به‌روزرسانی</button>`)+(ME.botOn===false?`<div class="warn" style="margin-bottom:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:200px">${ic("alert")} ربات <b>خاموشه</b>؛ کاربرها فقط پیام خاموشی می‌بینن.</span><button class="btn sm ok" data-a="botpower">روشن کن</button></div>`:"")+`
   <div class="grid g4">
     <div class="card kpi"><div class="l">فروش امروز ${ic("wallet")}</div><div class="v num">${fa(O.rev_today)}<small>تومان</small></div><div class="s">${fa(O.cnt_today)} سفارش تایید‌شده${O.topup_today?` · شارژ ${toman(O.topup_today)}`:""}</div></div>
     <div class="card kpi am"><div class="l">در انتظار تایید ${ic("receipt")}</div><div class="v num">${fa(O.pending)}<small>رسید</small></div><div class="s">${O.pending?"منتظر تصمیم شماست":"همه رسیدگی شده"}</div></div>

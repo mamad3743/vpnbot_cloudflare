@@ -190,6 +190,25 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
 .lctl button:hover{background:var(--s4);color:#fff}
 @media (pointer:coarse){.lchip{cursor:default}.lctl button{width:30px;height:28px}}
 
+
+/* خاموش/روشن ربات (هدر) */
+.power{display:inline-flex;align-items:center;gap:9px;padding:5px 12px 5px 6px;border-radius:99px;border:1px solid;font-weight:700;font-size:13px;cursor:pointer;transition:.2s}
+.power .tg{width:34px;height:20px;border-radius:99px;position:relative;transition:.25s;flex:none}
+.power .tg:after{content:"";position:absolute;top:3px;right:3px;width:14px;height:14px;border-radius:50%;background:#fff;transition:.25s}
+.power.on{border-color:rgba(16,185,129,.45);background:rgba(16,185,129,.1);color:var(--ok2)}.power.on .tg{background:var(--ok)}.power.on .tg:after{right:17px}
+.power.off{border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.12);color:var(--bad)}.power.off .tg{background:#7f1d1d}
+/* مینی‌اپ */
+.mini-grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;align-items:start}
+.phone{width:320px;height:640px;margin:0 auto;border-radius:44px;padding:10px;background:linear-gradient(145deg,#2a2840,#0d0c18);border:1px solid var(--line);box-shadow:0 30px 70px -20px rgba(0,0,0,.8),0 0 40px rgba(139,92,246,.2);position:relative}
+.phone iframe{width:100%;height:100%;border:0;border-radius:34px;background:#0a0912;display:block}
+.phone:before{content:"";position:absolute;top:16px;left:50%;transform:translateX(-50%);width:84px;height:5px;border-radius:5px;background:rgba(255,255,255,.18);z-index:2}
+.swatches{display:flex;gap:10px;flex-wrap:wrap}
+.swatch{width:42px;height:42px;border-radius:14px;border:2px solid transparent;cursor:pointer;position:relative;transition:.15s}
+.swatch.on{border-color:#fff;transform:scale(1.08);box-shadow:0 0 0 3px rgba(183,109,255,.5)}
+.swatch.on:after{content:"✓";position:absolute;inset:0;display:grid;place-items:center;color:#fff;font-weight:900}
+.ptabs{display:flex;gap:6px;justify-content:center;margin:12px 0 0;flex-wrap:wrap}
+@media (max-width:1060px){.mini-grid{grid-template-columns:1fr}}
+
 @media (max-width:1060px){.g4{grid-template-columns:repeat(2,1fr)}.g21,.g3{grid-template-columns:1fr}}
 @media (max-width:900px){
   aside{transform:translateX(100%);box-shadow:-20px 0 60px rgba(0,0,0,.6)}

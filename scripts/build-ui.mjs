@@ -2,6 +2,7 @@
 //   node scripts/build-ui.mjs
 //  - src/web/ui.generated.js       ← پنل وب  (panel.part1/2/3.html)
 //  - src/web/install.generated.js  ← ویزارد /install (panel.part1.html + install.part.html)
+//  - src/web/miniapp.generated.js  ← مینی‌اپ مشتری‌ها (miniapp.part1/2.html)
 //  - src/web/schema.generated.js   ← دستورهای schema.sql (برای ساخت جدول‌ها توسط ویزارد روی D1)
 import fs from "node:fs";
 const dir = new URL("../src/web/", import.meta.url);
@@ -15,10 +16,13 @@ w("ui.generated.js", `${head}export default ${JSON.stringify(panel)};\n`);
 const install = read("install.part.html"); // ویزارد مستقل (طراحی و CSS خودش رو داره)
 w("install.generated.js", `${head}export default ${JSON.stringify(install)};\n`);
 
+const miniapp = read("miniapp.part1.html") + read("miniapp.part2.html");
+w("miniapp.generated.js", `${head}export default ${JSON.stringify(miniapp)};\n`);
+
 const schema = fs.readFileSync(new URL("../schema.sql", import.meta.url), "utf8")
   .replace(/--[^\n]*/g, "")
   .split(";")
   .map((s) => s.trim())
   .filter(Boolean);
 w("schema.generated.js", `${head}export default ${JSON.stringify(schema, null, 1)};\n`);
-console.log(`ui ${(panel.length / 1024).toFixed(1)}KB · install ${(install.length / 1024).toFixed(1)}KB · schema ${schema.length} statements`);
+console.log(`miniapp ${(miniapp.length / 1024).toFixed(1)}KB · ui ${(panel.length / 1024).toFixed(1)}KB · install ${(install.length / 1024).toFixed(1)}KB · schema ${schema.length} statements`);

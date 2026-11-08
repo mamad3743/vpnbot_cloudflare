@@ -11,7 +11,8 @@
 import { PANEL_TYPES, hydratePanel, randomId, isIpHost, customPort, panelCreateUser, panelUsage, panelRenew, panelTest, panelFindUser, panelRenewExisting, ownsSubscription, clearPanelCache } from "./panels.js";
 import { qrPng } from "./qr.js";
 import { getSettingCached, setSettingCached } from "./web/optimizer.js";
-import { handleWeb, setOrigin, createLoginLink, runPanelCleanup } from "./web/api.js";
+import { handleWeb, setOrigin, getOrigin, createLoginLink, runPanelCleanup } from "./web/api.js";
+import { handleMiniApp, miniappCfg } from "./web/miniapp.js";
 import { handleInstall, handleInstallWebhook, resolveEnv, isInstalled } from "./web/install.js";
 
 const TG = (token) => `https://api.telegram.org/bot${token}`;
@@ -28,12 +29,13 @@ const MENU_ITEMS = [
   { key: "pricing", label: "💳 تعرفه اشتراک‌ها", style: "primary" },
   { key: "support", label: "☎️ پشتیبانی", style: "danger" },
   { key: "tutorial", label: "📚 آموزش اتصال", style: "primary" },
+  { key: "miniapp", label: "📱 مینی‌اپ", style: "success" }, // فقط وقتی مینی‌اپ از پنل روشن باشه نمایش داده میشه
   { key: "lookup", label: "🔎 استعلام/تمدید اشتراک قبلی", style: "primary" },
   { key: "admin", label: "🛠 پنل مدیریت", style: "primary" },
 ];
 const MENU_BY_KEY = Object.fromEntries(MENU_ITEMS.map((m) => [m.key, m]));
 // چیدمان پیش‌فرض منوی اصلی (هر آرایه = یک ردیف). ادمین از پنل وب می‌تونه عوضش کنه (cfg.layout)
-const DEFAULT_MENU_LAYOUT = [["buy", "renew"], ["trial", "wheel"], ["services", "wallet"], ["referral", "pricing"], ["support", "tutorial"], ["lookup"], ["admin"]];
+const DEFAULT_MENU_LAYOUT = [["buy", "renew"], ["trial", "wheel"], ["services", "wallet"], ["referral", "pricing"], ["support", "tutorial"], ["lookup"], ["miniapp"], ["admin"]];
 const COLOR_EMOJI = { primary: "🟦", success: "🟩", danger: "🟥", none: "⬜" };
 const COLOR_NAME = { primary: "آبی", success: "سبز", danger: "قرمز", none: "بدون رنگ" };
 const VALID_STYLES = ["primary", "success", "danger", "none"];
@@ -122,7 +124,9 @@ function styleMarkup(markup, cfg) {
     if (b._key) {
       const it = MENU_BY_KEY[b._key];
       const c = cfg?.menu?.[b._key];
-      return { ...done(b, c?.style || it.style), text: c?.label || it.label };
+      const base = { ...done(b, c?.style || it.style), text: c?.label || it.label };
+      if (b._key === "miniapp") base.web_app = { url: `${getOrigin()}/app` }; // دکمه‌ی کیبورد که مینی‌اپ رو باز می‌کنه
+      return base;
     }
     if (b.style) return done(b, b.style); // استایل صریح (مثلا دکمه سبز قوانین)
     const role = pickRole(b);
@@ -132,7 +136,7 @@ function styleMarkup(markup, cfg) {
   if (markup.inline_keyboard) out.inline_keyboard = markup.inline_keyboard.map((row) => row.map(mapBtn));
   if (markup.keyboard) {
     out.keyboard = applyLayout(markup.keyboard, cfg?.layout)
-      .map((row) => row.filter((b) => !(b && b._key && b._key !== "admin" && cfg?.menu?.[b._key]?.hidden)).map(mapBtn))
+      .map((row) => row.filter((b) => !(b && b._key && b._key !== "admin" && cfg?.menu?.[b._key]?.hidden)).filter((b) => !(b && b._key === "miniapp" && !(miniappCfg(cfg).enabled && getOrigin().startsWith("https://")))).map(mapBtn))
       .filter((row) => row.length);
   }
   return out;
@@ -208,7 +212,7 @@ const sendMessage = (env, chatId, text, extra = {}) =>
 const sendPhoto = (env, chatId, photo, caption, extra = {}) =>
   tgCall(env, "sendPhoto", { chat_id: chatId, photo, caption, parse_mode: "HTML", ...extra });
 const answerCallback = (env, id, text, showAlert = false) =>
-  tgCall(env, "answerCallbackQuery", { callback_query_id: id, text, show_alert: showAlert });
+  id === "deeplink" ? Promise.resolve({ ok: true }) : tgCall(env, "answerCallbackQuery", { callback_query_id: id, text, show_alert: showAlert });
 const editMessageText = (env, chatId, messageId, text, extra = {}) =>
   tgCall(env, "editMessageText", { chat_id: chatId, message_id: messageId, text, parse_mode: "HTML", ...extra });
 // نمایش مرحله‌ی بعد: اگه msgId داریم همون پیام قبلی ویرایش میشه (نه پیام جدید)؛
@@ -1224,6 +1228,46 @@ async function handleGroupMessage(env, message) {
   await sendMessage(env, chatId, "✅ گزارش‌دهی فعال شد و تاپیک‌ها ساخته شدن. از این به بعد تست رایگان، رسیدها، خریدها، شارژها، کاربران جدید و خطاها اینجا گزارش میشن.\n\n🧪 تست: /logtest\n🔕 قطع: /unsetlog", threadExtra);
 }
 
+// ---------- خاموش/روشن‌کردن ربات (از پنل وب) ----------
+const DEFAULT_OFF_TEXT = "🛠 ربات موقتا در حال به‌روزرسانیه. کمی بعد دوباره امتحان کن.";
+// برای کاربر عادی وقتی ربات خاموشه: true = درخواست رو بلاک کن. ادمین‌ها همیشه عبور می‌کنن
+async function botIsOffFor(env, userId) {
+  if (isAdmin(env, userId)) return false;
+  return (await getSetting(env, "bot_enabled", "1")) === "0";
+}
+
+// ---------- لینک‌های عمیق (از مینی‌اپ): /start p_12 | renew_5 | svc_o_3 | topup | shop ----------
+const DEEP_LINK_RE = /^(p_\d+|renew_\d+|svc_[oe]_\d+|topup|shop)$/;
+function walletMenu(dbUser) {
+  const rows = [50000, 100000, 200000, 500000].map((a) => [{ text: fmtMoney(a), callback_data: `topup:${a}` }]);
+  rows.push([{ text: "✏️ مبلغ دلخواه", callback_data: "topupcustom" }]);
+  return { text: `💰 موجودی فعلی کیف پول: ${fmtMoney(dbUser.wallet_balance)}\n\nچقدر می‌خوای شارژ کنی؟`, extra: { reply_markup: { inline_keyboard: rows } } };
+}
+// همون جریان‌های موجود ربات رو اجرا می‌کنه؛ پیام مقصد = یک پیام «⏳» که جریان‌ها ویرایشش می‌کنن
+async function runDeepLink(env, from, chatId, deep, dbUser) {
+  if (deep === "topup") {
+    const w = walletMenu(dbUser);
+    await sendMessage(env, chatId, w.text, w.extra);
+    return;
+  }
+  if (deep === "shop") {
+    const view = await buildBuyView(env);
+    await sendMessage(env, chatId, view.text, view.reply_markup ? { reply_markup: view.reply_markup } : {});
+    return;
+  }
+  let data;
+  if (deep.startsWith("p_")) data = `buy:${deep.slice(2)}`;
+  else if (deep.startsWith("renew_")) data = `renew:${deep.slice(6)}`;
+  else {
+    const m = deep.match(/^svc_([oe])_(\d+)$/);
+    data = `sv:${m[1]}:${m[2]}`;
+  }
+  const ph = await sendMessage(env, chatId, "⏳ چند لحظه...");
+  const mid = ph?.result?.message_id;
+  if (!mid) return;
+  await handleCallback(env, { id: "deeplink", from, message: { chat: { id: chatId }, message_id: mid }, data });
+}
+
 async function handleMessage(env, message) {
   if (message.chat.type !== "private") {
     await handleGroupMessage(env, message);
@@ -1236,6 +1280,15 @@ async function handleMessage(env, message) {
   const dbUser = await touchUser(env, message.from);
   if (dbUser.is_banned && !isAdmin(env, userId)) {
     await sendMessage(env, chatId, "🚫 دسترسی شما به ربات مسدود شده است.");
+    return;
+  }
+  if (await botIsOffFor(env, userId)) {
+    // حداکثر هر ۵ دقیقه یک بار به هر کاربر پیام «خاموشه» میدیم تا اسپم نشه
+    const k = `offmsg:${userId}`;
+    if (Date.now() - Number((await stateGet(env, k)) || 0) > 5 * 60 * 1000) {
+      await stateSet(env, k, String(Date.now()));
+      await sendMessage(env, chatId, (await getSetting(env, "bot_off_text", "")) || DEFAULT_OFF_TEXT);
+    }
     return;
   }
 
@@ -1315,6 +1368,7 @@ async function handleMessage(env, message) {
     const parts = text.split(" ");
     const refParam = parts[1] ? parts[1].trim() : null;
     const referrerId = refParam && /^\d+$/.test(refParam) ? refParam : null;
+    const deep = refParam && DEEP_LINK_RE.test(refParam) ? refParam : null;
 
     if (rulesNeeded) {
       if (referrerId) await stateSet(env, `pending_ref:${userId}`, referrerId);
@@ -1329,6 +1383,10 @@ async function handleMessage(env, message) {
       return;
     }
     if (dbUser.registered) {
+      if (deep) {
+        await runDeepLink(env, message.from, chatId, deep, dbUser); // لینک عمیق مینی‌اپ: مستقیم همون صفحه
+        return;
+      }
       await sendMessage(env, chatId, await renderWelcome(env, cfg, message.from, "back"), mainMenuKeyboard(isAdmin(env, userId)));
       return;
     }
@@ -1466,12 +1524,8 @@ async function handleMessage(env, message) {
   }
 
   if (mk === "wallet") {
-    const presets = [50000, 100000, 200000, 500000];
-    const rows = presets.map((a) => [{ text: fmtMoney(a), callback_data: `topup:${a}` }]);
-    rows.push([{ text: "✏️ مبلغ دلخواه", callback_data: "topupcustom" }]);
-    await sendMessage(env, chatId, `💰 موجودی فعلی کیف پول: ${fmtMoney(dbUser.wallet_balance)}\n\nچقدر می‌خوای شارژ کنی؟`, {
-      reply_markup: { inline_keyboard: rows },
-    });
+    const w = walletMenu(dbUser);
+    await sendMessage(env, chatId, w.text, w.extra);
     return;
   }
 
@@ -1728,10 +1782,99 @@ async function ownsService(env, cfg, userId, kind, id) {
   }
   return !!(await loadExtForUser(env, cfg, userId, id));
 }
+// ---------- انتقال سرویس به کاربر دیگه ----------
+const XFER_DAILY_LIMIT = 5; // حداکثر انتقال در روز برای هر کاربر
+const PENDING_ORDER_STATUSES = "('awaiting_receipt','pending','processing')";
+const faDigits = (s) => String(s ?? "").replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d));
+const userTag = (u) => `${escapeHtml(u.first_name || "کاربر")}${u.username ? ` (@${escapeHtml(u.username)})` : ""} <code>${u.id}</code>`;
+// آیا این سرویس قابل انتقاله؟ خروجی: {ok, label, product} یا {ok:false, reason}
+async function checkTransferable(env, cfg, userId, kind, id) {
+  if (cfg.transfer_enabled === false) return { ok: false, reason: "انتقال سرویس فعلا غیرفعاله." };
+  const NOT_FOUND = { ok: false, reason: "این سرویس پیدا نشد." };
+  const BUSY = { ok: false, reason: "یه درخواست تمدید در حال بررسی برای این سرویس هست؛ بعد از نتیجه‌ش انتقال بده." };
+  if (kind === "o") {
+    const o = await env.DB.prepare(
+      `SELECT o.id, o.amount, o.panel_id, o.panel_username, p.name AS pname FROM orders o LEFT JOIN products p ON p.id=o.product_id
+       WHERE o.id=? AND o.user_id=? AND o.type='purchase' AND o.status='approved'`
+    ).bind(id, userId).first();
+    if (!o) return NOT_FOUND;
+    if (!o.amount) return { ok: false, reason: "سرویس رایگان (تست) قابل انتقال نیست." };
+    if (await env.DB.prepare(`SELECT id FROM orders WHERE renew_of=? AND status IN ${PENDING_ORDER_STATUSES}`).bind(id).first()) return BUSY;
+    return { ok: true, label: o.panel_id && o.panel_username ? o.panel_username : `${o.pname || "سرویس"} #${id}`, product: o.pname || "" };
+  }
+  const ext = await loadExtForUser(env, cfg, userId, id);
+  if (!ext) return NOT_FOUND;
+  if (await env.DB.prepare(`SELECT id FROM orders WHERE ext_id=? AND status IN ${PENDING_ORDER_STATUSES}`).bind(ext.id).first()) return BUSY;
+  return { ok: true, label: ext.username, product: "اشتراک قبلی" };
+}
+// قوانین گیرنده: ثبت‌نام‌کرده، مسدود نباشه، خودِ فرستنده نباشه. خروجی: {user} یا {error}
+function validateTransferTarget(u, fromId) {
+  if (!u || !u.registered) return { error: "این کاربر توی ربات پیدا نشد. گیرنده باید قبلا ربات رو استارت کرده باشه." };
+  if (u.id === fromId) return { error: "نمی‌تونی سرویس رو به خودت منتقل کنی." };
+  if (u.is_banned) return { error: "انتقال به این کاربر ممکن نیست." };
+  return { user: u };
+}
+// پیدا کردن گیرنده با آیدی عددی یا @یوزرنیم (یا لینک t.me). خروجی: {user} یا {error}
+async function findTransferTarget(env, input, fromId) {
+  const t = faDigits(String(input || "").trim());
+  let u = null;
+  if (/^\d{5,15}$/.test(t)) u = await env.DB.prepare("SELECT id, first_name, username, registered, is_banned FROM users WHERE id=?").bind(t).first();
+  else {
+    const m = t.match(/^(?:https?:\/\/)?(?:t\.me\/|telegram\.me\/)?@?([A-Za-z0-9_]{4,32})$/);
+    if (!m) return { error: "آیدی عددی یا یوزرنیم (مثل @ali) بفرست." };
+    u = await env.DB.prepare("SELECT id, first_name, username, registered, is_banned FROM users WHERE LOWER(username)=LOWER(?)").bind(m[1]).first();
+  }
+  return validateTransferTarget(u, fromId);
+}
+// انتقال واقعی مالکیت + اطلاع به دو طرف
+async function performTransfer(env, cfg, fromId, kind, id, toId) {
+  const chk = await checkTransferable(env, cfg, fromId, kind, id);
+  if (!chk.ok) return { ok: false, error: chk.reason };
+  // گیرنده مستقیم با آیدی ذخیره‌شده توی دکمه‌ی تایید پیدا میشه (نه با تحلیل متن) و دوباره اعتبارسنجی میشه
+  const tgt = validateTransferTarget(await env.DB.prepare("SELECT id, first_name, username, registered, is_banned FROM users WHERE id=?").bind(toId).first(), fromId);
+  if (tgt.error) return { ok: false, error: tgt.error };
+  const day = new Date().toISOString().slice(0, 10);
+  const ck = `xfer:${fromId}:${day}`;
+  const used = Number((await stateGet(env, ck)) || 0);
+  if (used >= XFER_DAILY_LIMIT) return { ok: false, error: `حداکثر ${XFER_DAILY_LIMIT.toLocaleString("fa-IR")} انتقال در روز مجازه؛ فردا دوباره امتحان کن.` };
+  const to = tgt.user;
+  let changed = false;
+  if (kind === "o") {
+    const r = await env.DB.prepare("UPDATE orders SET user_id=? WHERE id=? AND user_id=? AND type='purchase' AND status='approved' AND amount>0").bind(to.id, id, fromId).run();
+    changed = !!(r.meta && r.meta.changes > 0);
+    // کانفیگ انبار (غیرپنلی) هم به گیرنده نسبت داده میشه
+    if (changed) await env.DB.prepare("UPDATE configs SET assigned_to=? WHERE assigned_to=? AND config_text=(SELECT config_text FROM orders WHERE id=?)").bind(to.id, fromId, id).run().catch(() => {});
+  } else {
+    try {
+      const r = await env.DB.prepare("UPDATE ext_services SET user_id=? WHERE id=? AND user_id=?").bind(to.id, id, fromId).run();
+      changed = !!(r.meta && r.meta.changes > 0);
+    } catch {
+      return { ok: false, error: "گیرنده همین اشتراک رو از قبل توی ربات داره." };
+    }
+  }
+  if (!changed) return { ok: false, error: "این سرویس پیدا نشد (شاید قبلا منتقل شده)." };
+  await stateDelete(env, svcNameKey(fromId, kind, id)); // اسم دلخواه فرستنده همراه سرویس نمیره
+  await stateSet(env, ck, String(used + 1));
+  const from = (await env.DB.prepare("SELECT id, first_name, username FROM users WHERE id=?").bind(fromId).first()) || { id: fromId };
+  await logEvent(env, "orders", `🔁 <b>انتقال سرویس</b>\n📛 ${escapeHtml(chk.label)} (${kind === "o" ? "سفارش" : "اشتراک قبلی"} #${id})\n👤 از: ${userTag(from)}\n➡️ به: ${userTag(to)}`);
+  let notified = true;
+  try {
+    const m = await sendMessage(
+      env,
+      to.id,
+      `🎁 <b>یه سرویس به شما منتقل شد!</b>\n\n📛 سرویس <b>${escapeHtml(chk.label)}</b>${chk.product ? ` (${escapeHtml(chk.product)})` : ""} از طرف ${userTag(from)} به شما انتقال یافت.\n\nاز این لحظه این سرویس توی «سرویس‌های من» شماست و می‌تونی مصرف، لینک و تمدیدش رو مدیریت کنی. برای دیدن مشخصات سرویس دکمه‌ی زیر رو بزن 👇`,
+      { reply_markup: { inline_keyboard: [[{ text: "📦 سرویس من", callback_data: `sv:${kind}:${id}` }]] } }
+    );
+    if (m && m.ok === false) notified = false;
+  } catch {
+    notified = false;
+  }
+  return { ok: true, label: chk.label, toTag: userTag(to), notified };
+}
 // صفحه‌ی جزئیات سرویس. خروجی: {text, reply_markup} یا {error}
 async function buildServiceDetail(env, userId, cfg, kind, id) {
   const names = await loadSvcNames(env, userId);
-  let title, productLine = "", usage = null, usageErr = false, link = null, isSub = true, renewCb = null;
+  let title, productLine = "", usage = null, usageErr = false, link = null, isSub = true, renewCb = null, canTransfer = false;
   if (kind === "o") {
     const o = await env.DB.prepare(
       `SELECT o.*, p.name as pname FROM orders o LEFT JOIN products p ON p.id=o.product_id
@@ -1739,6 +1882,7 @@ async function buildServiceDetail(env, userId, cfg, kind, id) {
     ).bind(id, userId).first();
     if (!o) return { error: "این سرویس پیدا نشد." };
     title = names[`o:${id}`] || (o.panel_id && o.panel_username ? o.panel_username : `${o.pname || "سرویس"} #${id}`);
+    canTransfer = !!o.amount; // سرویس رایگان (تست) قابل انتقال نیست
     productLine = `📦 محصول: ${escapeHtml(o.pname || "-")}`;
     link = o.config_text || null;
     isSub = /^https?:\/\//i.test(link || "");
@@ -1756,6 +1900,7 @@ async function buildServiceDetail(env, userId, cfg, kind, id) {
     const ext = await loadExtForUser(env, cfg, userId, id);
     if (!ext) return { error: "این اشتراک پیدا نشد." };
     title = names[`e:${id}`] || ext.username;
+    canTransfer = true;
     productLine = "🔎 اشتراک قبلی";
     renewCb = `xpl:${ext.id}`;
     try {
@@ -1781,6 +1926,7 @@ async function buildServiceDetail(env, userId, cfg, kind, id) {
   if (renewCb) r2.push({ text: "♻️ تمدید سرویس", callback_data: renewCb });
   if (r2.length) rows.push(r2);
   if (!cfg.menu.tutorial?.hidden) rows.push([{ text: "📚 نحوه اتصال به سرویس", callback_data: "tutorial" }]);
+  if (canTransfer && cfg.transfer_enabled !== false) rows.push([{ text: "🔁 انتقال سرویس به کاربر دیگه", callback_data: `sv:xf:${kind}:${id}` }]);
   rows.push([{ text: "✏️ تغییر نام نمایشی", callback_data: `sv:rn:${kind}:${id}` }]);
   rows.push([{ text: "🔙 برگشت به لیست", callback_data: "sv:l" }]);
   return { text: lines.join("\n"), reply_markup: { inline_keyboard: rows } };
@@ -2080,6 +2226,34 @@ async function handleUserStateInput(env, chatId, userId, text, st) {
     if (st.mid) await tgCall(env, "deleteMessage", { chat_id: chatId, message_id: st.mid });
     if (st.ext_id) await showCustomSummary(env, chatId, userId, product, st.gb, days, st.ext_id);
     else await askConfigName(env, chatId, userId, product, { gb: st.gb, days });
+    return;
+  }
+  if (st.action === "svc_xfer") {
+    if (Date.now() - (st.ts || 0) > 15 * 60 * 1000) {
+      await clearUserState(env, userId);
+      await sendMessage(env, chatId, "زمان این انتخاب تموم شده؛ از «سرویس‌های من» دوباره شروع کن.");
+      return;
+    }
+    const cfgX = await loadUiCfg(env);
+    const chk = await checkTransferable(env, cfgX, userId, st.kind, st.id);
+    if (!chk.ok) {
+      await clearUserState(env, userId);
+      await sendMessage(env, chatId, chk.reason);
+      return;
+    }
+    const tgt = await findTransferTarget(env, text, userId);
+    if (tgt.error) {
+      await sendMessage(env, chatId, `${tgt.error}\nدوباره بفرست یا /cancel بزن.`);
+      return;
+    }
+    await clearUserState(env, userId);
+    await showStep(
+      env,
+      chatId,
+      null,
+      `⚠️ <b>تایید انتقال سرویس</b>\n\n📛 سرویس: <b>${escapeHtml(chk.label)}</b>\n➡️ گیرنده: ${userTag(tgt.user)}\n\nبعد از انتقال:\n• مدیریت و تمدید این سرویس فقط از طرف گیرنده امکان‌پذیره و برگشتش فقط با رضایت خودش ممکنه.\n• لینک/کانفیگی که قبلا برای خودت ذخیره کرده‌ای هنوز کار می‌کنه؛ اگه نمی‌خوای کسی جز گیرنده ازش استفاده کنه، این رو در نظر بگیر.\n\nمطمئنی؟`,
+      { reply_markup: { inline_keyboard: [[{ text: "✅ بله، منتقل کن", callback_data: `sv:xc:${st.kind}:${st.id}:${tgt.user.id}` }], [{ text: "❌ انصراف", callback_data: `sv:${st.kind}:${st.id}` }]] } }
+    );
     return;
   }
   if (st.action === "svc_rename") {
@@ -2602,6 +2776,10 @@ async function handleCallback(env, cq) {
     return;
   }
 
+  if (await botIsOffFor(env, userId)) {
+    await answerCallback(env, cq.id, (await getSetting(env, "bot_off_text", "")) || DEFAULT_OFF_TEXT, true);
+    return;
+  }
   if (!isAdmin(env, userId)) {
     const du = await getUser(env, userId);
     if (du && du.is_banned) {
@@ -2822,7 +3000,7 @@ async function handleCallback(env, cq) {
   }
 
   // ---------- سرویس‌های من: لیست / جزئیات / نام نمایشی / کانفیگ تکی ----------
-  if (/^sv:(l|[oe]:\d+|cf:[oe]:\d+|rn:[oe]:\d+|rd:[oe]:\d+)$/.test(data)) {
+  if (/^sv:(l|[oe]:\d+|cf:[oe]:\d+|rn:[oe]:\d+|rd:[oe]:\d+|xf:[oe]:\d+|xc:[oe]:\d+:\d+)$/.test(data)) {
     const parts2 = data.split(":");
     const cfgS = await loadUiCfg(env);
     const sub = parts2[1];
@@ -2880,6 +3058,40 @@ async function handleCallback(env, cq) {
       if (chunkTxt) out.push(chunkTxt);
       await sendMessage(env, chatId, `📋 کانفیگ‌های تکی این سرویس (${shown.length} عدد)؛ هر کدوم رو لمس کن تا کپی بشه:`);
       for (const t of out) await sendMessage(env, chatId, t);
+      return;
+    }
+    // xf: شروع انتقال ← گرفتن گیرنده؛ xc: تایید نهایی
+    if (sub === "xf") {
+      const chk = await checkTransferable(env, cfgS, userId, kind, id);
+      if (!chk.ok) {
+        await answerCallback(env, cq.id, chk.reason, true);
+        return;
+      }
+      await setUserState(env, userId, { action: "svc_xfer", kind, id, mid: messageId, ts: Date.now() });
+      await answerCallback(env, cq.id, "");
+      await showStep(
+        env,
+        chatId,
+        messageId,
+        `🔁 <b>انتقال سرویس</b>\n📛 ${escapeHtml(chk.label)}\n\nآیدی عددی یا یوزرنیم (مثل @ali) کسی که می‌خوای سرویس رو بهش بدی بفرست.\n\n• گیرنده باید قبلا ربات رو استارت کرده باشه.\n• تا قبل از تایید نهایی چیزی منتقل نمیشه.`,
+        { reply_markup: { inline_keyboard: [[{ text: "🔙 انصراف", callback_data: `sv:${kind}:${id}` }]] } }
+      );
+      return;
+    }
+    if (sub === "xc") {
+      const r = await performTransfer(env, cfgS, userId, kind, id, parts2[4]);
+      if (!r.ok) {
+        await answerCallback(env, cq.id, r.error, true);
+        return;
+      }
+      await answerCallback(env, cq.id, "✅ منتقل شد");
+      await showStep(
+        env,
+        chatId,
+        messageId,
+        `✅ <b>سرویس منتقل شد</b>\n📛 ${escapeHtml(r.label)}\n👤 گیرنده: ${r.toTag}${r.notified ? "\n\nبه گیرنده اطلاع داده شد." : "\n\n⚠️ نتونستم به گیرنده پیام بدم؛ خودت بهش بگو ربات رو چک کنه («سرویس‌های من»)."}`,
+        { reply_markup: { inline_keyboard: [[{ text: "📋 سرویس‌های من", callback_data: "sv:l" }]] } }
+      );
       return;
     }
     // rn / rd: اول مطمئن میشیم سرویس مال همین کاربره
@@ -4203,6 +4415,7 @@ export const internals = {
   MENU_ITEMS, DEFAULT_MENU_LAYOUT, LOG_TOPICS, DEFAULT_RULES_TEXT, DEFAULT_RULES_BTN, DEFAULT_WELCOME_TEXT, DEFAULT_WELCOME_BACK_TEXT, VALID_STYLES,
   PANEL_TYPES, panelTest, isIpHost,
   startBroadcast, stopBroadcast, runBroadcastTick, stateGet, stateDelete,
+  loadSvcNames, loadExtForUser, listProducts, listCategories, panelUsage, panelFindUser,
   dumpDatabaseSql, gzipText, sendBackupToLog,
 };
 
@@ -4212,6 +4425,7 @@ export default {
   async scheduled(event, env) {
     env = await resolveEnv(env);
     if (!isInstalled(env)) return { idle: true }; // هنوز نصب نشده
+    { const po = await getSetting(env, "public_origin", ""); if (po) setOrigin(env, po); }
     // Cron هر دقیقه / تایمر سرور = ادامه‌ی پیام همگانی؛ بقیه = بکاپ شبانه
     if (event.cron === "* * * * *") return runBroadcastTick(env, { maxSends: 40 });
     if (event.cron === "broadcast") return runBroadcastTick(env, { unlimited: true });
@@ -4242,6 +4456,8 @@ export default {
     }
 
     if (request.method === "POST" && url.pathname === `/webhook/${env.WEBHOOK_SECRET}`) {
+      // آدرس عمومی رو یادمون می‌مونه تا دکمه‌ی مینی‌اپ توی پیام‌های Cron هم درست ساخته بشه
+      if (url.origin.startsWith("https://") && (await getSetting(env, "public_origin", "")) !== url.origin) await setSetting(env, "public_origin", url.origin).catch(() => {});
       let update;
       try {
         update = await request.json();
@@ -4272,6 +4488,9 @@ export default {
       }
       return new Response("ok");
     }
+
+    // ---------- مینی‌اپ مشتری‌ها ----------
+    if (url.pathname === "/app" || url.pathname.startsWith("/app/")) return handleMiniApp(request, env, ctx, internals);
 
     // ---------- پنل وب ----------
     if (url.pathname === "/") return Response.redirect(`${url.origin}/panel`, 302);

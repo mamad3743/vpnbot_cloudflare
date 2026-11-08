@@ -6,6 +6,7 @@
 import PANEL_HTML from "./ui.generated.js";
 import { stats as optStats, invalidateSettings, cacheJson, dropCache } from "./optimizer.js";
 import { cfUsage, cfConfigured } from "./cfstats.js";
+import { miniappCfg, MINIAPP_ACCENTS } from "./miniapp.js";
 import { verifyPassword, hashPassword, getInstallCfg, saveInstallCfg, adminList as adminListI } from "./install.js";
 
 const enc = new TextEncoder();
@@ -16,6 +17,7 @@ const tFilter = (t) => (t === "state" ? "WHERE key LIKE 'svcname:%'" : t === "se
 const VERSION = "5.0.0";
 
 let ORIGIN = "";
+export const getOrigin = () => ORIGIN;
 export function setOrigin(env, o) {
   const real = o && !/^https?:\/\/(internal|localhost:0)(\/|$)/.test(o) ? o : "";
   ORIGIN = (env.PUBLIC_URL || real || ORIGIN || "").replace(/\/+$/, "");
@@ -210,8 +212,9 @@ export async function handleWeb(request, env, ctx, I) {
 }
 
 // ---------- me / overview ----------
-R("GET", "/api/me", async ({ env, session }) =>
+R("GET", "/api/me", async ({ env, session, I }) =>
   json({
+    botOn: (await I.getSetting(env, "bot_enabled", "1")) !== "0", botOffText: await I.getSetting(env, "bot_off_text", ""),
     ok: true, version: VERSION, runtime: env.RUNTIME === "node" ? "railway" : "cloudflare", user: session.u,
     kv: !!env.KV, cf: cfConfigured(env), password: !!(env.PANEL_PASSWORD || env.PANEL_PASSWORD_HASH),
   })
@@ -402,6 +405,7 @@ R("POST", "/api/products", async ({ env, body, I }) => {
   if (!name) return err("نام محصول الزامیه");
   const price = Math.round(num(b.price, 0));
   if (price < 0) return err("قیمت منفی نمیشه");
+  if (b.is_trial && b.custom) return err("محصول حجم دلخواه نمی‌تونه تست رایگان باشه.");
   let custom = null, ck = null;
   if (b.custom) {
     const c = b.custom;
@@ -520,7 +524,7 @@ R("POST", "/api/vpnpanels/:id/test", async ({ env, params, I }) => {
 });
 
 // ---------- تنظیمات ----------
-const SIMPLE_KEYS = { card_number: 60, card_holder: 80, support_text: 3500, tutorial_text: 3500, bot_display_name: 80 };
+const SIMPLE_KEYS = { bot_off_text: 500, card_number: 60, card_holder: 80, support_text: 3500, tutorial_text: 3500, bot_display_name: 80 };
 R("GET", "/api/settings", async ({ env, I }) => {
   const g = (k, d = "") => I.getSetting(env, k, d);
   const [ui, log, wheel] = await Promise.all([I.loadUiCfg(env), I.getLogCfg(env), I.getWheelPrizes(env)]);
@@ -530,14 +534,15 @@ R("GET", "/api/settings", async ({ env, I }) => {
     simple: {
       card_number: await g("card_number"), card_holder: await g("card_holder"), support_text: await g("support_text"),
       tutorial_text: await g("tutorial_text"), bot_display_name: await g("bot_display_name", "ربات فروش کانفیگ"),
-      referral_percent: await g("referral_percent", "10"),
+      referral_percent: await g("referral_percent", "10"), bot_off_text: await g("bot_off_text"),
     },
     wheel,
     ui: {
       menu: ui.menu, roles: ui.roles, rules_enabled: ui.rules_enabled !== false, rules_text: ui.rules_text || "", rules_btn: ui.rules_btn || "",
-      qr_enabled: ui.qr_enabled !== false, ext_verify: ui.ext_verify !== false,
+      qr_enabled: ui.qr_enabled !== false, ext_verify: ui.ext_verify !== false, transfer_enabled: ui.transfer_enabled !== false,
       welcome_text: ui.welcome_text || "", welcome_back_text: ui.welcome_back_text || "",
       layout: Array.isArray(ui.layout) ? ui.layout : null,
+      miniapp: { ...miniappCfg(ui), url: ORIGIN ? `${ORIGIN}/app` : "", https: ORIGIN.startsWith("https://"), accents: MINIAPP_ACCENTS },
     },
     defaults: { layout: I.DEFAULT_MENU_LAYOUT, rules_text: I.DEFAULT_RULES_TEXT, rules_btn: I.DEFAULT_RULES_BTN, welcome_text: I.DEFAULT_WELCOME_TEXT, welcome_back_text: I.DEFAULT_WELCOME_BACK_TEXT, menu: I.MENU_ITEMS },
     log: { chat_id: log.chat_id, off: log.off, topics: Object.entries(I.LOG_TOPICS).map(([k, v]) => ({ key: k, label: v.label })) },
@@ -548,6 +553,7 @@ R("GET", "/api/settings", async ({ env, I }) => {
 const TG_HTML_OK = /^(?:[^<]|<\/?(?:b|strong|i|em|u|ins|s|strike|del|code|pre|a(?: href="[^"]*")?|tg-spoiler|blockquote)>)*$/;
 R("POST", "/api/settings", async ({ env, body, I, session }) => {
   const b = await body();
+  let menuToggle = null; // اگه وضعیت مینی‌اپ عوض شد، دکمه‌ی منوی تلگرام هم به‌روز میشه
   if (b.simple) {
     for (const [k, max] of Object.entries(SIMPLE_KEYS)) if (k in b.simple) await I.setSetting(env, k, str(b.simple[k], max));
     if ("referral_percent" in b.simple) {
@@ -604,6 +610,19 @@ R("POST", "/api/settings", async ({ env, body, I, session }) => {
     if ("rules_enabled" in u) cfg.rules_enabled = !!u.rules_enabled;
     if ("qr_enabled" in u) cfg.qr_enabled = !!u.qr_enabled;
     if ("ext_verify" in u) cfg.ext_verify = !!u.ext_verify;
+    if ("transfer_enabled" in u) cfg.transfer_enabled = !!u.transfer_enabled;
+    if (u.miniapp && typeof u.miniapp === "object") {
+      const m = u.miniapp, cur = miniappCfg(cfg), wasOn = cur.enabled;
+      const next = { ...cur };
+      if ("enabled" in m) next.enabled = !!m.enabled;
+      if ("accent" in m) { if (!MINIAPP_ACCENTS.includes(m.accent)) return err("رنگ نامعتبره"); next.accent = m.accent; }
+      if ("title" in m) next.title = str(m.title, 40).trim();
+      if ("banner" in m) next.banner = str(m.banner, 200).trim();
+      if (m.sections && typeof m.sections === "object") for (const k of ["shop", "wallet", "referral", "support"]) if (k in m.sections) next.sections[k] = !!m.sections[k];
+      if (next.enabled && !ORIGIN.startsWith("https://")) return err("مینی‌اپ فقط روی آدرس https کار می‌کنه (تلگرام آدرس http رو قبول نمی‌کنه).");
+      cfg.miniapp = next;
+      menuToggle = next.enabled !== wasOn || ("title" in m && next.enabled) ? next : null;
+    }
     if ("rules_btn" in u) { const t = str(u.rules_btn, 60).trim(); if (t && t !== I.DEFAULT_RULES_BTN) cfg.rules_btn = t; else delete cfg.rules_btn; }
     if ("rules_text" in u) {
       const t = str(u.rules_text, 3500).trim();
@@ -623,6 +642,8 @@ R("POST", "/api/settings", async ({ env, body, I, session }) => {
     }
     await I.saveUiCfg(env, cfg);
   }
+  let menuButton = null;
+  if (menuToggle) menuButton = await applyMenuButton(env, I, menuToggle);
   if (b.log) {
     const cfg = await I.getLogCfg(env);
     if (Array.isArray(b.log.off)) cfg.off = b.log.off.filter((k) => I.LOG_TOPICS[k]);
@@ -641,7 +662,7 @@ R("POST", "/api/settings", async ({ env, body, I, session }) => {
     const r = await I.rawCall(env, "sendMessage", { chat_id: to, text, parse_mode: "HTML" });
     if (!r.ok) return err(r.description || "تلگرام متن رو نپذیرفت");
   }
-  return json({ ok: true });
+  return json({ ok: true, menuButton });
 });
 R("POST", "/api/channels", async ({ env, body }) => {
   const b = await body();
@@ -653,6 +674,34 @@ R("POST", "/api/channels", async ({ env, body }) => {
 R("DELETE", "/api/channels", async ({ env, url }) => {
   await env.DB.prepare("DELETE FROM channels WHERE ref=?").bind(url.searchParams.get("ref") || "").run();
   return json({ ok: true });
+});
+
+// دکمه‌ی آبی کنار نوار پیام ربات: مینی‌اپ روشن → web_app، خاموش → حالت پیش‌فرض
+async function applyMenuButton(env, I, mc) {
+  try {
+    const menu_button = mc.enabled
+      ? { type: "web_app", text: mc.title ? mc.title.slice(0, 16) : "📱 باز کردن", web_app: { url: `${ORIGIN}/app` } }
+      : { type: "default" };
+    const r = await I.rawCall(env, "setChatMenuButton", { menu_button });
+    return r.ok ? { ok: true } : { ok: false, error: r.description || "تلگرام نپذیرفت" };
+  } catch (e) {
+    return { ok: false, error: String(e?.message || e) };
+  }
+}
+R("POST", "/api/miniapp/apply", async ({ env, I }) => {
+  const mc = miniappCfg(await I.loadUiCfg(env));
+  if (mc.enabled && !ORIGIN.startsWith("https://")) return err("آدرس https مشخص نیست.");
+  const r = await applyMenuButton(env, I, mc);
+  return r.ok ? json({ ok: true }) : err(r.error);
+});
+// ---------- خاموش/روشن‌کردن ربات ----------
+R("POST", "/api/bot/power", async ({ env, body, I, session }) => {
+  const b = await body();
+  const on = b.enabled !== false;
+  if ("text" in b) await I.setSetting(env, "bot_off_text", str(b.text, 500).trim());
+  await I.setSetting(env, "bot_enabled", on ? "1" : "0");
+  await I.logEvent(env, "errors", `${on ? "🟢 <b>ربات روشن شد</b>" : "🔴 <b>ربات خاموش شد</b>"} (از پنل وب)\n👤 ${session.u ? await I.logUserTag(env, session.u) : "ورود با رمز پنل"}`);
+  return json({ ok: true, enabled: on });
 });
 
 // ---------- پیام همگانی (موتور خود ربات: کار پایدار، قابل ادامه بعد از ری‌استارت، با رعایت سرعت تلگرام) ----------
@@ -794,6 +843,8 @@ R("POST", "/api/backup/log", async ({ env, body, I, session }) => {
 // پاکسازی توکن‌های ورود و شمارنده‌های تلاش ناموفق (روزی یک‌بار از بکاپ شبانه / تایمر سرور)
 export async function runPanelCleanup(env) {
   await env.DB.prepare("DELETE FROM state WHERE (key LIKE 'plogin:%' OR key LIKE 'rl:%') AND updated_at < ?").bind(Date.now() - 86400000).run();
+  await env.DB.prepare("DELETE FROM state WHERE key LIKE 'xfer:%' AND updated_at < ?").bind(Date.now() - 2 * 86400000).run();
+  await env.DB.prepare("DELETE FROM state WHERE key LIKE 'offmsg:%' AND updated_at < ?").bind(Date.now() - 86400000).run(); // شمارنده‌ی روزانه‌ی انتقال سرویس
 }
 
 // ---------- اتصال و دسترسی (مقادیر ذخیره‌شده توسط نصب‌کننده) ----------
