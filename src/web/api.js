@@ -11,10 +11,10 @@ import { verifyPassword, hashPassword, getInstallCfg, saveInstallCfg, adminList 
 
 const enc = new TextEncoder();
 const SESSION_DAYS = 7;
-const TABLES = ["users", "products", "categories", "configs", "orders", "referrals", "channels", "exit_logs", "panels", "ext_services", "settings", "state"];
+const TABLES = ["users", "products", "categories", "configs", "orders", "referrals", "channels", "exit_logs", "panels", "ext_services", "settings", "state", "resellers", "coupons", "tickets", "ticket_messages", "transactions", "audit_logs", "server_health"];
 // جدول state موقتیه؛ فقط اسم‌های دلخواه سرویس‌ها (svcname:*) بکاپ/بازیابی میشن
 const tFilter = (t) => (t === "state" ? "WHERE key LIKE 'svcname:%'" : t === "settings" ? "WHERE key NOT IN ('install_cfg','install_pending')" : "");
-const VERSION = "5.0.0";
+const VERSION = "6.0.0";
 
 let ORIGIN = "";
 export const getOrigin = () => ORIGIN;
@@ -211,6 +211,109 @@ export async function handleWeb(request, env, ctx, I) {
   return err("not found", 404);
 }
 
+// ---------- امکانات مدیریتی نسخه ۶ ----------
+async function audit(env, session, request, action, targetType = "", targetId = "", details = "") {
+  await env.DB.prepare("INSERT INTO audit_logs (admin_id,action,target_type,target_id,details,ip,created_at) VALUES (?,?,?,?,?,?,?)")
+    .bind(session?.u || null, str(action, 80), str(targetType, 40), str(targetId, 80), str(details, 500), clientIp(request), Date.now()).run();
+}
+R("GET", "/api/advanced/summary", async ({ env }) => {
+  const r = await env.DB.batch([
+    env.DB.prepare("SELECT COUNT(*) n FROM resellers WHERE enabled=1"),
+    env.DB.prepare("SELECT COUNT(*) n FROM coupons WHERE enabled=1"),
+    env.DB.prepare("SELECT COUNT(*) n FROM tickets WHERE status IN ('open','pending')"),
+    env.DB.prepare("SELECT COUNT(*) n FROM audit_logs"),
+    env.DB.prepare("SELECT COALESCE(SUM(amount),0) total FROM transactions WHERE type='wallet_adjustment' AND created_at>=?").bind(Date.now()-30*86400000),
+  ]);
+  return json({ok:true,resellers:r[0].results[0].n,coupons:r[1].results[0].n,openTickets:r[2].results[0].n,auditEvents:r[3].results[0].n,walletAdjustments30d:r[4].results[0].total});
+});
+R("GET", "/api/resellers", async ({ env, url }) => {
+  const q=(url.searchParams.get("q")||"").trim();
+  const rows=await env.DB.prepare(`SELECT r.*,u.username,u.first_name,u.wallet_balance FROM resellers r LEFT JOIN users u ON u.id=r.user_id ${q?"WHERE CAST(r.user_id AS TEXT)=? OR u.username LIKE ? OR u.first_name LIKE ?":""} ORDER BY r.created_at DESC LIMIT 200`)
+    .bind(...(q?[q,`%${q.replace(/^@/,"")}%`,`%${q}%`]:[])).all();
+  return json({ok:true,rows:rows.results||[]});
+});
+R("POST", "/api/resellers", async ({ env, body, session, request }) => {
+  const b=await body(), userId=int(b.user_id), commission=num(b.commission_percent), markup=num(b.price_markup_percent), now=Date.now();
+  if(userId<=0) return err("آیدی عددی کاربر نامعتبره");
+  if(commission<0||commission>100||markup<0||markup>500) return err("درصد کمیسیون یا افزایش قیمت خارج از محدوده است");
+  const u=await env.DB.prepare("SELECT id FROM users WHERE id=?").bind(userId).first(); if(!u) return err("کاربر ابتدا باید ربات را استارت کرده باشد",404);
+  await env.DB.prepare(`INSERT INTO resellers(user_id,commission_percent,price_markup_percent,enabled,note,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET commission_percent=excluded.commission_percent,price_markup_percent=excluded.price_markup_percent,enabled=excluded.enabled,note=excluded.note,updated_at=excluded.updated_at`)
+    .bind(userId,commission,markup,b.enabled===false?0:1,str(b.note,300),now,now).run();
+  await audit(env,session,request,"reseller.save","user",userId,`commission=${commission};markup=${markup}`);
+  return json({ok:true});
+});
+R("DELETE", "/api/resellers/:id", async ({ env, params, session, request }) => {
+  await env.DB.prepare("DELETE FROM resellers WHERE user_id=?").bind(params.id).run();
+  await audit(env,session,request,"reseller.delete","user",params.id);
+  return json({ok:true});
+});
+R("GET", "/api/coupons", async ({ env }) => {
+  const r=await env.DB.prepare("SELECT * FROM coupons ORDER BY id DESC LIMIT 200").all(); return json({ok:true,rows:r.results||[]});
+});
+R("POST", "/api/coupons", async ({ env, body, session, request }) => {
+  const b=await body(), code=str(b.code,40).trim().toUpperCase().replace(/\s+/g,"");
+  const type=b.discount_type==="fixed"?"fixed":"percent", value=int(b.discount_value), max=int(b.max_uses), now=Date.now();
+  if(!/^[A-Z0-9_-]{3,40}$/.test(code)) return err("کد باید ۳ تا ۴۰ کاراکتر انگلیسی، عدد یا خط تیره باشد");
+  if(value<=0||(type==="percent"&&value>100)) return err("مقدار تخفیف نامعتبره");
+  try {
+    if(b.id) await env.DB.prepare("UPDATE coupons SET code=?,discount_type=?,discount_value=?,max_uses=?,starts_at=?,expires_at=?,enabled=? WHERE id=?").bind(code,type,value,Math.max(0,max),int(b.starts_at)||null,int(b.expires_at)||null,b.enabled===false?0:1,b.id).run();
+    else await env.DB.prepare("INSERT INTO coupons(code,discount_type,discount_value,max_uses,starts_at,expires_at,enabled,created_at) VALUES(?,?,?,?,?,?,1,?)").bind(code,type,value,Math.max(0,max),int(b.starts_at)||null,int(b.expires_at)||null,now).run();
+  } catch(e) { if(String(e.message).includes("UNIQUE")) return err("این کد قبلاً ثبت شده"); throw e; }
+  await audit(env,session,request,"coupon.save","coupon",b.id||code,`${type}:${value}`); return json({ok:true});
+});
+R("DELETE", "/api/coupons/:id", async ({ env, params, session, request }) => {
+  await env.DB.prepare("DELETE FROM coupons WHERE id=?").bind(params.id).run(); await audit(env,session,request,"coupon.delete","coupon",params.id); return json({ok:true});
+});
+R("GET", "/api/tickets", async ({ env, url }) => {
+  const status=url.searchParams.get("status")||"", where=status?"WHERE t.status=?":"";
+  const [tot,rows]=await env.DB.batch([
+    env.DB.prepare(`SELECT COUNT(*) n FROM tickets t ${where}`).bind(...(status?[status]:[])),
+    env.DB.prepare(`SELECT t.*,u.username,u.first_name,(SELECT message FROM ticket_messages m WHERE m.ticket_id=t.id ORDER BY m.id DESC LIMIT 1) last_message FROM tickets t LEFT JOIN users u ON u.id=t.user_id ${where} ORDER BY t.updated_at DESC LIMIT 100`).bind(...(status?[status]:[])),
+  ]); return json({ok:true,total:tot.results[0].n,rows:rows.results||[]});
+});
+R("GET", "/api/tickets/:id", async ({ env, params }) => {
+  const [t,m]=await env.DB.batch([env.DB.prepare("SELECT * FROM tickets WHERE id=?").bind(params.id),env.DB.prepare("SELECT * FROM ticket_messages WHERE ticket_id=? ORDER BY id ASC LIMIT 200").bind(params.id)]);
+  if(!t.results[0]) return err("تیکت پیدا نشد",404); return json({ok:true,ticket:t.results[0],messages:m.results||[]});
+});
+R("POST", "/api/tickets/:id/reply", async ({ env, params, body, I, session, request }) => {
+  const b=await body(), message=str(b.message,3500).trim(), t=await env.DB.prepare("SELECT user_id,status FROM tickets WHERE id=?").bind(params.id).first();
+  if(!t) return err("تیکت پیدا نشد",404); if(!message) return err("متن پاسخ خالیه");
+  const adminId=session.u||int(adminList(env)[0]);
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO ticket_messages(ticket_id,sender_id,sender_type,message,created_at) VALUES(?,?,'admin',?,?)").bind(params.id,adminId,message,Date.now()),
+    env.DB.prepare("UPDATE tickets SET status='pending',updated_at=? WHERE id=?").bind(Date.now(),params.id),
+  ]);
+  const sent=await I.sendMessage(env,t.user_id,`🎫 پاسخ پشتیبانی (تیکت #${params.id}):\n\n${message}`);
+  await audit(env,session,request,"ticket.reply","ticket",params.id);
+  return sent?.ok===false?err(sent.description||"پاسخ ذخیره شد اما ارسال تلگرام ناموفق بود"):json({ok:true});
+});
+R("POST", "/api/tickets/:id/status", async ({ env, params, body, session, request }) => {
+  const b=await body(), status=["open","pending","closed"].includes(b.status)?b.status:"open";
+  const r=await env.DB.prepare("UPDATE tickets SET status=?,updated_at=?,closed_at=? WHERE id=?").bind(status,Date.now(),status==="closed"?Date.now():null,params.id).run();
+  if(!(r.meta?.changes>0)) return err("تیکت پیدا نشد",404); await audit(env,session,request,"ticket.status","ticket",params.id,status); return json({ok:true});
+});
+R("GET", "/api/finance/transactions", async ({ env, url }) => {
+  const page=Math.max(1,int(url.searchParams.get("page"),1)), size=30, q=(url.searchParams.get("q")||"").trim();
+  const where=q?"WHERE t.user_id=? OR u.username LIKE ?":"", b=q?[int(q,-1),`%${q}%`]:[];
+  const [tot,rows]=await env.DB.batch([env.DB.prepare(`SELECT COUNT(*) n FROM transactions t LEFT JOIN users u ON u.id=t.user_id ${where}`).bind(...b),env.DB.prepare(`SELECT t.*,u.username,u.first_name FROM transactions t LEFT JOIN users u ON u.id=t.user_id ${where} ORDER BY t.id DESC LIMIT ? OFFSET ?`).bind(...b,size,(page-1)*size)]);
+  return json({ok:true,total:tot.results[0].n,page,size,rows:rows.results||[]});
+});
+R("GET", "/api/audit", async ({ env }) => { const r=await env.DB.prepare("SELECT * FROM audit_logs ORDER BY id DESC LIMIT 150").all(); return json({ok:true,rows:r.results||[]}); });
+R("GET", "/api/server-health", async ({ env }) => { const r=await env.DB.prepare("SELECT h.*,p.name panel_name FROM server_health h LEFT JOIN panels p ON p.id=h.panel_id ORDER BY h.id DESC LIMIT 100").all(); return json({ok:true,rows:r.results||[]}); });
+R("POST", "/api/server-health/check", async ({ env, I, session, request }) => {
+  const p=await env.DB.prepare("SELECT id,name FROM panels WHERE enabled=1 ORDER BY id LIMIT 20").all(), rows=[];
+  for(const panel of p.results||[]){
+    const started=Date.now(); let status="error", message="";
+    try { const full=await I.getPanel(env,panel.id); message=await I.panelTest(full); status="ok"; }
+    catch(e){ message=str(e?.message||e,300); }
+    const latency=Date.now()-started;
+    await env.DB.prepare("INSERT INTO server_health(panel_id,status,latency_ms,message,checked_at) VALUES(?,?,?,?,?)").bind(panel.id,status,latency,message,Date.now()).run();
+    rows.push({panel_id:panel.id,name:panel.name,status,latency_ms:latency,message});
+  }
+  await audit(env,session,request,"panels.health_check","panels","all",`checked=${rows.length}`);
+  return json({ok:true,rows});
+});
+
 // ---------- me / overview ----------
 R("GET", "/api/me", async ({ env, session, I }) =>
   json({
@@ -343,16 +446,22 @@ R("POST", "/api/users/:id/ban", async ({ env, params, body }) => {
   await env.DB.prepare("UPDATE users SET is_banned=? WHERE id=?").bind(b.banned ? 1 : 0, params.id).run();
   return json({ ok: true });
 });
-R("POST", "/api/users/:id/wallet", async ({ env, params, body, I }) => {
+R("POST", "/api/users/:id/wallet", async ({ env, params, body, I, session, request }) => {
   const b = await body();
   const delta = Math.round(num(b.delta, 0));
   if (!delta) return err("مبلغ نامعتبره");
+  const before = await env.DB.prepare("SELECT wallet_balance FROM users WHERE id=?").bind(params.id).first();
+  if (!before) return err("کاربر پیدا نشد", 404);
   const r = await env.DB.prepare("UPDATE users SET wallet_balance = MAX(0, wallet_balance + ?) WHERE id=?").bind(delta, params.id).run();
-  if (!(r.meta && r.meta.changes > 0)) return err("کاربر پیدا نشد", 404);
+  if (!(r.meta && r.meta.changes > 0)) return err("موجودی تغییر نکرد", 409);
   if (b.notify) {
     await I.sendMessage(env, params.id, delta > 0 ? `💰 ${I.fmtMoney(delta)} به کیف پول شما اضافه شد.` : `💳 ${I.fmtMoney(-delta)} از کیف پول شما کم شد.`);
   }
   const u = await env.DB.prepare("SELECT wallet_balance FROM users WHERE id=?").bind(params.id).first();
+  await env.DB.prepare("INSERT INTO transactions(user_id,type,amount,balance_after,note,admin_id,created_at) VALUES(?,?,?,?,?,?,?)")
+    .bind(params.id,"wallet_adjustment",u.wallet_balance-Number(before.wallet_balance||0),u.wallet_balance,str(b.note||"تغییر موجودی از پنل",250),session?.u||null,Date.now()).run();
+  await env.DB.prepare("INSERT INTO audit_logs(admin_id,action,target_type,target_id,details,ip,created_at) VALUES(?,?,?,?,?,?,?)")
+    .bind(session?.u||null,"wallet.adjust","user",params.id,`delta=${delta};balance=${u.wallet_balance}`,clientIp(request),Date.now()).run();
   return json({ ok: true, balance: u.wallet_balance });
 });
 R("POST", "/api/users/:id/message", async ({ env, params, body, I }) => {

@@ -15,18 +15,30 @@ function drawProducts(){
     return `<div class="it" style="${p.enabled?"":"opacity:.55"}"><div class="main-c"><div class="t">${esc(p.name)} ${p.is_trial?chip("تست رایگان","wa"):""} ${p.custom?chip("حجم دلخواه","vi"):""}</div><div class="m">${p.custom?`${fa(p.custom.min_gb)}–${fa(p.custom.max_gb)} گیگ · ${fa(p.custom.min_days)}–${fa(p.custom.max_days)} روز · هر گیگ ${toman(p.custom.price_per_gb)}`:`${toman(p.price)} · ${fa(p.duration_days)} روز${p.data_limit_gb?` · ${fa(p.data_limit_gb)} گیگ`:p.panel_id?" · نامحدود":""}`}${p.category_name?" · "+esc(p.category_name):""}</div></div>${stock}<div class="acts">${!p.panel_id&&!p.custom?`<button class="btn sm" data-a="pcfg" data-id="${p.id}">${ic("box")}کانفیگ‌ها</button>`:""}<button class="btn sm" data-a="pedit" data-id="${p.id}">${ic("edit")}</button><button class="btn sm bad" data-a="pdel" data-id="${p.id}">${ic("trash")}</button></div></div>`}).join("")}</div>`:empty("هنوز محصولی نساختی.","cart");
 }
 A.ptab=el=>{PT.tab=el.dataset.k;$$(".tab").forEach(t=>t.classList.toggle("on",t===el));drawProducts()};
+function setupWizard(root){
+  const box=$("[data-wizard]",root);if(!box)return;
+  const steps=$$("[data-wstep]",box),labels=$$(".wiz-steps span",box),footer=$(".md-f",root);
+  let at=0;const save=footer?.querySelector("button");
+  const nav=document.createElement("div");nav.className="wiz-nav";
+  nav.innerHTML='<button type="button" class="btn" data-prev>مرحله قبل</button><span class="m" data-count></span><button type="button" class="btn pri" data-next>مرحله بعد</button>';
+  box.append(nav);
+  const render=()=>{steps.forEach((x,i)=>x.hidden=i!==at);labels.forEach((x,i)=>x.classList.toggle("on",i===at));nav.querySelector("[data-prev]").hidden=at===0;nav.querySelector("[data-next]").hidden=at===steps.length-1;nav.querySelector("[data-count]").textContent=`مرحله ${at+1} از ${steps.length}`;if(save)save.hidden=at!==steps.length-1;};
+  nav.querySelector("[data-prev]").onclick=()=>{at=Math.max(0,at-1);render()};
+  nav.querySelector("[data-next]").onclick=()=>{const required=steps[at].querySelectorAll("input[required],select[required],textarea[required]");for(const el of required){if(!el.reportValidity())return}at=Math.min(steps.length-1,at+1);render()};
+  render();
+}
 function productForm(p){
   p=p||{enabled:1,duration_days:30,price:0,data_limit_gb:0};const cu=p.custom||{min_gb:5,max_gb:200,min_days:30,max_days:365,price_per_gb:2000,price_per_day:0};
   const panelsOpt=[["","بدون پنل (تحویل دستی از انبار)"],...PT.panels.map(x=>[x.id,x.name+(x.enabled?"":" (غیرفعال)")])];
   const catOpt=[["","بدون دسته"],...PT.cats.map(x=>[x.id,x.name])];
-  return `${field("نام محصول",inp("name",p.name||"",{ph:"مثلا ۳۰ گیگ یک‌ماهه"}))}
-  <div class="sr"><div>حجم دلخواه<small>مشتری گیگ و روز رو خودش انتخاب می‌کنه و قیمت خودکار حساب میشه (حتما به پنل وصل کن)</small></div>${sw("is_custom",!!p.custom)}</div>
+  return `<div class="wiz" data-wizard><div class="wiz-steps"><span>۱. مشخصات</span><span>۲. قیمت و حجم</span><span>۳. تحویل و وضعیت</span></div>
+  <section data-wstep="0">${field("نام محصول",inp("name",p.name||"",{ph:"مثلا ۳۰ گیگ یک‌ماهه"}))}${field("توضیحات",`<textarea name="description" style="min-height:70px">${esc(p.description||"")}</textarea>`)}</section>
+  <section data-wstep="1"><div class="sr"><div>حجم دلخواه<small>مشتری گیگ و روز رو خودش انتخاب می‌کنه و قیمت خودکار حساب میشه (حتما به پنل وصل کن)</small></div>${sw("is_custom",!!p.custom)}</div>
   <div id="pf-fixed" style="margin-top:12px"><div class="row3">${field("قیمت (تومان)",inp("price",p.price,{num:1}))}${field("مدت (روز)",inp("duration_days",p.duration_days,{num:1}))}${field("حجم (گیگ)",inp("data_limit_gb",p.data_limit_gb||0,{num:1}),"فقط پنلی؛ ۰ = نامحدود")}</div></div>
-  <div id="pf-custom" style="margin-top:12px" hidden><div class="row2">${field("حداقل گیگ",inp("min_gb",cu.min_gb,{num:1}))}${field("حداکثر گیگ",inp("max_gb",cu.max_gb,{num:1}))}</div><div class="row2">${field("حداقل روز",inp("min_days",cu.min_days,{num:1}))}${field("حداکثر روز",inp("max_days",cu.max_days,{num:1}))}</div><div class="row2">${field("قیمت هر گیگ",inp("price_per_gb",cu.price_per_gb,{num:1}))}${field("قیمت هر روز",inp("price_per_day",cu.price_per_day||0,{num:1}),"اختیاری")}</div></div>
-  <div class="row2">${field("اتصال به پنل",sel("panel_id",panelsOpt,p.panel_id||""))}${field("دسته‌بندی",sel("category_id",catOpt,p.category_id||""))}</div>
-  ${field("توضیحات",`<textarea name="description" style="min-height:70px">${esc(p.description||"")}</textarea>`)}
+  <div id="pf-custom" style="margin-top:12px" hidden><div class="row2">${field("حداقل گیگ",inp("min_gb",cu.min_gb,{num:1}))}${field("حداکثر گیگ",inp("max_gb",cu.max_gb,{num:1}))}</div><div class="row2">${field("حداقل روز",inp("min_days",cu.min_days,{num:1}))}${field("حداکثر روز",inp("max_days",cu.max_days,{num:1}))}</div><div class="row2">${field("قیمت هر گیگ",inp("price_per_gb",cu.price_per_gb,{num:1}))}${field("قیمت هر روز",inp("price_per_day",cu.price_per_day||0,{num:1}),"اختیاری")}</div></div></section>
+  <section data-wstep="2"><div class="row2">${field("اتصال به پنل",sel("panel_id",panelsOpt,p.panel_id||""))}${field("دسته‌بندی",sel("category_id",catOpt,p.category_id||""))}</div>
   <div class="sr"><span>فعال (قابل نمایش برای مشتری)</span>${sw("enabled",p.enabled!==0)}</div>
-  <div class="sr"><div>تست رایگان<small>فقط یک محصول می‌تونه تست رایگان باشه؛ قیمتش رو ۰ بذار</small></div>${sw("is_trial",!!p.is_trial)}</div>`;
+  <div class="sr"><div>تست رایگان<small>فقط یک محصول می‌تونه تست رایگان باشه؛ قیمتش رو ۰ بذار</small></div>${sw("is_trial",!!p.is_trial)}</div></section></div>`;
 }
 function openProduct(p){
   const m=openModal(p?"ویرایش محصول":"محصول جدید",productForm(p),[{t:"ذخیره",c:"pri",f:async c=>{
@@ -34,7 +46,7 @@ function openProduct(p){
     if(f.is_custom)b.custom={min_gb:nd(f.min_gb),max_gb:nd(f.max_gb),min_days:nd(f.min_days),max_days:nd(f.max_days),price_per_gb:nd(f.price_per_gb),price_per_day:nd(f.price_per_day||0)};
     else{b.price=nd(f.price);b.duration_days=nd(f.duration_days);b.data_limit_gb=nd(f.data_limit_gb||0)}
     await api("/api/products",{method:"POST",body:b});toast("ذخیره شد");c();route()}}],{wide:true});
-  const t=()=>{const on=$("[name=is_custom]",m.root).checked;$("#pf-fixed",m.root).hidden=on;$("#pf-custom",m.root).hidden=!on;const tr=$("[name=is_trial]",m.root);tr.disabled=on;if(on)tr.checked=false};$("[name=is_custom]",m.root).onchange=t;t();
+  setupWizard(m.root);\n  const t=()=>{const on=$("[name=is_custom]",m.root).checked;$("#pf-fixed",m.root).hidden=on;$("#pf-custom",m.root).hidden=!on;const tr=$("[name=is_trial]",m.root);tr.disabled=on;if(on)tr.checked=false};$("[name=is_custom]",m.root).onchange=t;t();
 }
 A.pnew=()=>openProduct();
 A.pedit=el=>openProduct(PT.products.find(x=>x.id==el.dataset.id));
@@ -58,20 +70,21 @@ PAGES.panels=async v=>{
 };
 function vpForm(p){
   p=p||{type:"marzban",enabled:1,extra:{}};const x=p.extra||{};
-  return `<div class="row2">${field("نوع پنل",p.id?`<input type="text" value="${esc(PT.ptypes[p.type])}" disabled><input type="hidden" name="type" value="${p.type}">`:sel("type",Object.entries(PT.ptypes),p.type))}${field("نام",inp("name",p.name||"",{ph:"مثلا هتزنر آلمان"}))}</div>
-  ${field("آدرس پنل",inp("base_url",p.base_url||"",{ph:"https://panel.example.com",dir:"ltr"}),"سنایی: آدرس کامل با مسیر مخفی")}
-  <div class="row2">${field("یوزرنیم",inp("username",p.username||"",{dir:"ltr"}))}${field("پسورد",inp("password","",{type:"password",ph:p.id&&p.has_password?"بدون تغییر":""}))}</div>
-  ${field("آدرس ساب",inp("sub_base",x.sub_base||"",{dir:"ltr",ph:"https://sub.example.com:2096/sub"}),"سنایی: الزامی. بقیه: اختیاری")}
-  <div class="row2" data-t="marzban">${field("پروتکل‌ها",inp("protocols",(x.protocols||[]).join(","),{dir:"ltr",ph:"vless,vmess"}),"پیش‌فرض vless")}${field("flow",inp("flow",x.flow||"",{dir:"ltr",ph:"xtls-rprx-vision"}),"برای Reality")}</div>
+  return `<div class="wiz" data-wizard><div class="wiz-steps"><span>۱. نوع و آدرس</span><span>۲. دسترسی</span><span>۳. تنظیمات</span></div>
+  <section data-wstep="0"><div class="row2">${field("نوع پنل",p.id?`<input type="text" value="${esc(PT.ptypes[p.type])}" disabled><input type="hidden" name="type" value="${p.type}">`:sel("type",Object.entries(PT.ptypes),p.type))}${field("نام",inp("name",p.name||"",{ph:"مثلا هتزنر آلمان"}))}</div>
+  ${field("آدرس پنل",inp("base_url",p.base_url||"",{ph:"https://panel.example.com",dir:"ltr"}),"سنایی: آدرس کامل با مسیر مخفی")}</section>
+  <section data-wstep="1"><div class="row2">${field("یوزرنیم",inp("username",p.username||"",{dir:"ltr"}))}${field("پسورد",inp("password","",{type:"password",ph:p.id&&p.has_password?"بدون تغییر":""}))}</div>
+  ${field("آدرس ساب",inp("sub_base",x.sub_base||"",{dir:"ltr",ph:"https://sub.example.com:2096/sub"}),"سنایی: الزامی. بقیه: اختیاری")}</section>
+  <section data-wstep="2"><div class="row2" data-t="marzban">${field("پروتکل‌ها",inp("protocols",(x.protocols||[]).join(","),{dir:"ltr",ph:"vless,vmess"}),"پیش‌فرض vless")}${field("flow",inp("flow",x.flow||"",{dir:"ltr",ph:"xtls-rprx-vision"}),"برای Reality")}</div>
   <div data-t="pasarguard">${field("آیدی گروه‌ها",inp("group_ids",(x.group_ids||[]).join(","),{dir:"ltr",ph:"1,2"}),"خالی = همه‌ی گروه‌ها")}</div>
   <div data-t="sanaei">${field("آیدی اینباند",inp("inbound_id",x.inbound_id||"",{num:1}))}${field("توکن API (اختیاری)",inp("api_token","",{type:"password",ph:p.has_token?"بدون تغییر":""}))}</div>
-  <div class="sr"><span>فعال</span>${sw("enabled",p.enabled!==0)}</div>`;
+  <div class="sr"><span>فعال</span>${sw("enabled",p.enabled!==0)}</div></section></div>`;
 }
 function openVp(p){
   const m=openModal(p?"ویرایش پنل":"پنل جدید",vpForm(p),[{t:"ذخیره",c:"pri",f:async c=>{
     const f=formData(m.root);await api("/api/vpnpanels",{method:"POST",body:{id:p?.id,type:f.type,name:f.name,base_url:f.base_url,username:f.username,password:f.password,api_token:f.api_token,enabled:f.enabled,extra:{sub_base:f.sub_base,flow:f.flow,protocols:f.protocols,group_ids:f.group_ids,inbound_id:nd(f.inbound_id)}}});
     toast("ذخیره شد");c();route()}}],{wide:true});
-  const t=()=>{const ty=$("[name=type]",m.root).value;$$("[data-t]",m.root).forEach(e=>{e.hidden=e.dataset.t!==ty})};
+  setupWizard(m.root);\n  const t=()=>{const ty=$("[name=type]",m.root).value;$$("[data-t]",m.root).forEach(e=>{e.hidden=e.dataset.t!==ty})};
   t();$("[name=type]",m.root).onchange=t;
 }
 A.vpnew=()=>openVp();A.vpedit=el=>openVp(PT.panels.find(x=>x.id==el.dataset.id));
@@ -331,6 +344,46 @@ A.chadd=el=>busy(el,async()=>{const f=formData($("#chf"));await api("/api/channe
 A.chdel=el=>busy(el,async()=>{await api("/api/channels?ref="+encodeURIComponent(el.dataset.ref),{method:"DELETE"});ST.data=await api("/api/settings");drawSettings()});
 A.logtest=el=>busy(el,async()=>{await api("/api/settings",{method:"POST",body:{log:{test:true}}});toast("پیام تست ارسال شد")});
 A.logoff=async el=>{if(await confirmBox("اتصال گروه گزارش قطع بشه؟"))busy(el,async()=>{await api("/api/settings",{method:"POST",body:{log:{chat_id:null}}});toast("قطع شد");ST.data=await api("/api/settings");drawSettings()})};
+
+/* ============ مدیریت پیشرفته نسخه ۶ ============ */
+const ADV={tab:"resellers"};
+const advTabs=[["resellers","نمایندگی‌ها"],["coupons","کدهای تخفیف"],["tickets","تیکت‌های پشتیبانی"],["health","سلامت پنل‌ها"],["transactions","تغییرات کیف پول"],["audit","گزارش فعالیت"]];
+PAGES.advanced=async el=>{
+  const s=await api("/api/advanced/summary");
+  el.innerHTML=head("مدیریت پیشرفته","زیرساخت مالی، نمایندگی‌ها، پشتیبانی و ردگیری تغییرات")+
+    `<div class="gr3" style="margin-bottom:18px"><div class="card kpi"><div class="l">نمایندگی‌های فعال</div><div class="v">${fa(s.resellers)}</div></div><div class="card kpi am"><div class="l">کدهای تخفیف فعال</div><div class="v">${fa(s.coupons)}</div></div><div class="card kpi gr"><div class="l">تیکت‌های باز</div><div class="v">${fa(s.openTickets)}</div></div></div>
+    <div class="card"><div class="tabs" id="advtabs">${advTabs.map(([k,l])=>`<button class="tab ${ADV.tab===k?"on":""}" data-a="advtab" data-k="${k}">${l}</button>`).join("")}</div><div id="advbody">${skel(3)}</div></div>`;
+  loadAdvanced();
+};
+async function loadAdvanced(){
+  const el=$("#advbody");if(!el)return;
+  if(ADV.tab==="resellers"){
+    const j=await api("/api/resellers");el.innerHTML=`<div class="ph"><div class="pd">ثبت مشخصات نماینده و تنظیم درصد کمیسیون/افزایش قیمت؛ فعال‌سازی فروش نمایندگی در جریان خرید نیازمند اتصال مرحله بعد است.</div><div class="sp"></div><button class="btn pri" data-a="reselleradd">${ic("plus")}افزودن نماینده</button></div>`+
+      (j.rows.length?`<div class="list">${j.rows.map(r=>`<div class="it"><div class="main-c"><div class="t">${esc(r.first_name||"کاربر")} ${r.username?`<span class="m">@${esc(r.username)}</span>`:""}</div><div class="m mono">${r.user_id} · کمیسیون ${fa(r.commission_percent)}٪ · افزایش قیمت ${fa(r.price_markup_percent)}٪</div></div>${chip(r.enabled?"فعال":"غیرفعال",r.enabled?"ok":"er")}<button class="btn sm" data-a="reselleredit" data-id="${r.user_id}">ویرایش</button><button class="btn sm bad" data-a="resellerdel" data-id="${r.user_id}">حذف</button></div>`).join("")}</div>`:empty("هنوز نماینده‌ای ثبت نشده","users"));
+  } else if(ADV.tab==="coupons"){
+    const j=await api("/api/coupons");el.innerHTML=`<div class="ph"><div class="pd">تعریف و نگهداری کدهای تخفیف. اعمال خودکار کد در فرایند خرید هنوز به موتور خرید متصل نشده است.</div><div class="sp"></div><button class="btn pri" data-a="couponadd">${ic("plus")}کد جدید</button></div>`+
+      (j.rows.length?`<div class="list">${j.rows.map(c=>`<div class="it"><div class="main-c"><div class="t mono">${esc(c.code)}</div><div class="m">${c.discount_type==="percent"?fa(c.discount_value)+"٪":toman(c.discount_value)} تخفیف · استفاده ${fa(c.used_count)} از ${c.max_uses?fa(c.max_uses):"نامحدود"}</div></div>${chip(c.enabled?"فعال":"غیرفعال",c.enabled?"ok":"er")}<button class="btn sm bad" data-a="coupondel" data-id="${c.id}">حذف</button></div>`).join("")}</div>`:empty("کدی ثبت نشده","cart"));
+  } else if(ADV.tab==="tickets"){
+    const j=await api("/api/tickets");el.innerHTML=`<div class="pd" style="margin-bottom:12px">نمایش و پاسخ به تیکت‌هایی که در جدول پشتیبانی ثبت شده‌اند.</div>`+
+      (j.rows.length?`<div class="list">${j.rows.map(t=>`<div class="it"><div class="main-c"><div class="t">#${fa(t.id)} · ${esc(t.subject)}</div><div class="m">${esc(t.first_name||"کاربر")} · ${t.user_id} · ${dt(t.updated_at)}</div></div>${chip(t.status==="closed"?"بسته":t.status==="pending"?"در انتظار پاسخ":"باز",t.status==="closed"?"er":"wa")}<button class="btn sm" data-a="ticketview" data-id="${t.id}">مشاهده و پاسخ</button></div>`).join("")}</div>`:empty("تیکتی ثبت نشده؛ ثبت تیکت از سمت کاربر هنوز به ربات متصل نشده است","send"));
+  } else if(ADV.tab==="health"){
+    const j=await api("/api/server-health");el.innerHTML=`<div class="ph"><div class="pd">تست اتصال پنل‌های فعال و نگهداری تاریخچه آخرین بررسی‌ها.</div><div class="sp"></div><button class="btn pri" data-a="healthcheck">${ic("refresh")}بررسی همه پنل‌ها</button></div>`+
+      (j.rows.length?`<div class="list">${j.rows.map(h=>`<div class="it"><div class="main-c"><div class="t">${esc(h.panel_name||("پنل #"+h.panel_id))}</div><div class="m">${esc(h.message||"")} · ${dt(h.checked_at)}</div></div>${chip(h.status==="ok"?"متصل":"خطا",h.status==="ok"?"ok":"er")}<span class="m">${fa(h.latency_ms)} ms</span></div>`).join("")}</div>`:empty("هنوز بررسی سلامت انجام نشده","server"));
+  } else if(ADV.tab==="transactions"){
+    const j=await api("/api/finance/transactions");el.innerHTML=j.rows.length?`<div class="list">${j.rows.map(t=>`<div class="it"><div class="main-c"><div class="t">${esc(t.first_name||"کاربر")} <span class="m mono">${t.user_id}</span></div><div class="m">${esc(t.note||t.type)} · ${dt(t.created_at)}</div></div><span class="chip ${t.amount>=0?"ok":"er"}">${t.amount>=0?"+":""}${toman(t.amount)}</span><span class="m">مانده: ${toman(t.balance_after)}</span></div>`).join("")}</div>`:empty("تراکنشی در دفتر جدید ثبت نشده؛ از این نسخه به بعد تغییر موجودی دستی ثبت می‌شود","wallet");
+  } else {
+    const j=await api("/api/audit");el.innerHTML=j.rows.length?`<div class="list">${j.rows.map(a=>`<div class="it"><div class="main-c"><div class="t">${esc(a.action)}</div><div class="m">${esc(a.target_type)} ${esc(a.target_id)} · ${esc(a.details||"")} · IP ${esc(a.ip||"—")}</div></div><span class="m">${dt(a.created_at)}</span></div>`).join("")}</div>`:empty("هنوز رویدادی ثبت نشده","receipt");
+  }
+}
+A.advtab=el=>{ADV.tab=el.dataset.k;$$("#advtabs .tab").forEach(t=>t.classList.toggle("on",t===el));loadAdvanced()};
+A.reselleradd=()=>resellerModal();
+A.reselleredit=async el=>{const j=await api("/api/resellers?q="+encodeURIComponent(el.dataset.id));if(j.rows[0])resellerModal(j.rows[0])};
+A.resellerdel=async el=>{if(await confirmBox("این نماینده حذف شود؟")){await api("/api/resellers/"+el.dataset.id,{method:"DELETE"});toast("نماینده حذف شد");loadAdvanced()}};
+function resellerModal(r={}){const m=openModal(r.user_id?"ویرایش نماینده":"افزودن نماینده",`${field("آیدی عددی تلگرام",inp("user_id",r.user_id||"",{num:1}),"کاربر باید قبلاً ربات را استارت کرده باشد")}${field("درصد کمیسیون",inp("commission_percent",r.commission_percent??0,{num:1}))}${field("درصد افزایش قیمت",inp("price_markup_percent",r.price_markup_percent??0,{num:1}))}${field("یادداشت",inp("note",r.note||""))}<div class="sr"><span>نماینده فعال باشد</span>${sw("enabled",r.enabled!==0)}</div>`,[{t:"ذخیره",c:"pri",f:async c=>{const f=formData(m.root);await api("/api/resellers",{method:"POST",body:{...f,user_id:nd(f.user_id),commission_percent:nd(f.commission_percent),price_markup_percent:nd(f.price_markup_percent)}});c();toast("ذخیره شد");loadAdvanced()}}]);}
+A.couponadd=()=>{const m=openModal("ثبت کد تخفیف",`${field("کد تخفیف",inp("code","",{ph:"مثلاً TATA10"}))}${field("نوع تخفیف",sel("discount_type",[["percent","درصدی"],["fixed","مبلغ ثابت (تومان)"]],"percent"))}${field("مقدار تخفیف",inp("discount_value","10",{num:1}))}${field("حداکثر دفعات استفاده (۰ = نامحدود)",inp("max_uses","0",{num:1}))}`, [{t:"ثبت کد",c:"pri",f:async c=>{const f=formData(m.root);await api("/api/coupons",{method:"POST",body:{...f,discount_value:nd(f.discount_value),max_uses:nd(f.max_uses)}});c();toast("کد ثبت شد");loadAdvanced()}}])};
+A.coupondel=async el=>{if(await confirmBox("کد تخفیف حذف شود؟")){await api("/api/coupons/"+el.dataset.id,{method:"DELETE"});toast("حذف شد");loadAdvanced()}};
+A.healthcheck=el=>busy(el,async()=>{const r=await api("/api/server-health/check",{method:"POST",body:{}});toast(`بررسی ${fa(r.rows.length)} پنل انجام شد`);loadAdvanced()});
+A.ticketview=async el=>{const j=await api("/api/tickets/"+el.dataset.id);const t=j.ticket;const m=openModal("تیکت #"+t.id,`<div class="list" style="max-height:48vh;overflow:auto;margin-bottom:14px">${j.messages.map(x=>`<div class="it"><div class="main-c"><div class="m">${x.sender_type==="admin"?"پشتیبانی":"کاربر"} · ${dt(x.created_at)}</div><div>${esc(x.message).replace(/\n/g,"<br>")}</div></div></div>`).join("")||empty("پیامی ثبت نشده")}</div>${field("پاسخ پشتیبانی",`<textarea name="message" rows="4" placeholder="متن پاسخ..."></textarea>`)}`, [{t:"ارسال پاسخ",c:"pri",f:async c=>{const message=$("[name=message]",m.root).value.trim();if(!message)throw new Error("متن پاسخ را بنویس");await api(`/api/tickets/${t.id}/reply`,{method:"POST",body:{message}});c();toast("پاسخ ارسال شد");loadAdvanced()}},{t:t.status==="closed"?"بازکردن تیکت":"بستن تیکت",c:"ok",f:async c=>{await api(`/api/tickets/${t.id}/status`,{method:"POST",body:{status:t.status==="closed"?"open":"closed"}});c();toast("وضعیت تغییر کرد");loadAdvanced()}}],{wide:true})};
 
 /* ============ شروع ============ */
 async function boot(){

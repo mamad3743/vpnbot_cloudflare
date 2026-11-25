@@ -14,5 +14,17 @@ export default [
  "CREATE TABLE IF NOT EXISTS state (\n  key TEXT PRIMARY KEY,\n  value TEXT,\n  updated_at INTEGER\n)",
  "CREATE INDEX IF NOT EXISTS idx_configs_product_unused ON configs (product_id, is_used)",
  "CREATE INDEX IF NOT EXISTS idx_orders_user ON orders (user_id)",
- "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders (status)"
+ "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders (status)",
+ "CREATE TABLE IF NOT EXISTS resellers (\n  user_id INTEGER PRIMARY KEY,\n  commission_percent REAL NOT NULL DEFAULT 0,\n  price_markup_percent REAL NOT NULL DEFAULT 0,\n  enabled INTEGER NOT NULL DEFAULT 1,\n  note TEXT DEFAULT '',\n  created_at INTEGER NOT NULL,\n  updated_at INTEGER NOT NULL\n)",
+ "CREATE TABLE IF NOT EXISTS coupons (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  code TEXT NOT NULL UNIQUE,\n  discount_type TEXT NOT NULL DEFAULT 'percent',\n  discount_value INTEGER NOT NULL,\n  max_uses INTEGER NOT NULL DEFAULT 0,\n  used_count INTEGER NOT NULL DEFAULT 0,\n  starts_at INTEGER,\n  expires_at INTEGER,\n  enabled INTEGER NOT NULL DEFAULT 1,\n  created_at INTEGER NOT NULL\n)",
+ "CREATE TABLE IF NOT EXISTS tickets (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  user_id INTEGER NOT NULL,\n  subject TEXT NOT NULL,\n  status TEXT NOT NULL DEFAULT 'open',\n  priority TEXT NOT NULL DEFAULT 'normal',\n  created_at INTEGER NOT NULL,\n  updated_at INTEGER NOT NULL,\n  closed_at INTEGER\n)",
+ "CREATE TABLE IF NOT EXISTS ticket_messages (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  ticket_id INTEGER NOT NULL,\n  sender_id INTEGER NOT NULL,\n  sender_type TEXT NOT NULL DEFAULT 'user',\n  message TEXT NOT NULL,\n  created_at INTEGER NOT NULL\n)",
+ "CREATE TABLE IF NOT EXISTS transactions (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  user_id INTEGER NOT NULL,\n  type TEXT NOT NULL,\n  amount INTEGER NOT NULL,\n  balance_after INTEGER NOT NULL,\n  note TEXT DEFAULT '',\n  admin_id INTEGER,\n  created_at INTEGER NOT NULL\n)",
+ "CREATE TABLE IF NOT EXISTS audit_logs (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  admin_id INTEGER,\n  action TEXT NOT NULL,\n  target_type TEXT DEFAULT '',\n  target_id TEXT DEFAULT '',\n  details TEXT DEFAULT '',\n  ip TEXT DEFAULT '',\n  created_at INTEGER NOT NULL\n)",
+ "CREATE TABLE IF NOT EXISTS server_health (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  panel_id INTEGER,\n  status TEXT NOT NULL,\n  latency_ms INTEGER,\n  message TEXT DEFAULT '',\n  checked_at INTEGER NOT NULL\n)",
+ "CREATE INDEX IF NOT EXISTS idx_tickets_status_updated ON tickets(status, updated_at)",
+ "CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket ON ticket_messages(ticket_id, id)",
+ "CREATE INDEX IF NOT EXISTS idx_transactions_user_created ON transactions(user_id, created_at)",
+ "CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at)",
+ "CREATE INDEX IF NOT EXISTS idx_coupons_code ON coupons(code)"
 ];
