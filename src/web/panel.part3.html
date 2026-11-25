@@ -46,7 +46,8 @@ function openProduct(p){
     if(f.is_custom)b.custom={min_gb:nd(f.min_gb),max_gb:nd(f.max_gb),min_days:nd(f.min_days),max_days:nd(f.max_days),price_per_gb:nd(f.price_per_gb),price_per_day:nd(f.price_per_day||0)};
     else{b.price=nd(f.price);b.duration_days=nd(f.duration_days);b.data_limit_gb=nd(f.data_limit_gb||0)}
     await api("/api/products",{method:"POST",body:b});toast("ذخیره شد");c();route()}}],{wide:true});
-  setupWizard(m.root);\n  const t=()=>{const on=$("[name=is_custom]",m.root).checked;$("#pf-fixed",m.root).hidden=on;$("#pf-custom",m.root).hidden=!on;const tr=$("[name=is_trial]",m.root);tr.disabled=on;if(on)tr.checked=false};$("[name=is_custom]",m.root).onchange=t;t();
+  setupWizard(m.root);
+  const t=()=>{const on=$("[name=is_custom]",m.root).checked;$("#pf-fixed",m.root).hidden=on;$("#pf-custom",m.root).hidden=!on;const tr=$("[name=is_trial]",m.root);tr.disabled=on;if(on)tr.checked=false};$("[name=is_custom]",m.root).onchange=t;t();
 }
 A.pnew=()=>openProduct();
 A.pedit=el=>openProduct(PT.products.find(x=>x.id==el.dataset.id));
@@ -84,7 +85,8 @@ function openVp(p){
   const m=openModal(p?"ویرایش پنل":"پنل جدید",vpForm(p),[{t:"ذخیره",c:"pri",f:async c=>{
     const f=formData(m.root);await api("/api/vpnpanels",{method:"POST",body:{id:p?.id,type:f.type,name:f.name,base_url:f.base_url,username:f.username,password:f.password,api_token:f.api_token,enabled:f.enabled,extra:{sub_base:f.sub_base,flow:f.flow,protocols:f.protocols,group_ids:f.group_ids,inbound_id:nd(f.inbound_id)}}});
     toast("ذخیره شد");c();route()}}],{wide:true});
-  setupWizard(m.root);\n  const t=()=>{const ty=$("[name=type]",m.root).value;$$("[data-t]",m.root).forEach(e=>{e.hidden=e.dataset.t!==ty})};
+  setupWizard(m.root);
+  const t=()=>{const ty=$("[name=type]",m.root).value;$$("[data-t]",m.root).forEach(e=>{e.hidden=e.dataset.t!==ty})};
   t();$("[name=type]",m.root).onchange=t;
 }
 A.vpnew=()=>openVp();A.vpedit=el=>openVp(PT.panels.find(x=>x.id==el.dataset.id));
