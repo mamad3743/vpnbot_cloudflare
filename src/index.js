@@ -1497,6 +1497,7 @@ async function handleMessage(env, message) {
   }
 
   if (mk === "wheel") {
+    if (cfg.features?.wheel === false) { await sendMessage(env, chatId, "🎰 گردونه شانس فعلاً غیرفعاله."); return; }
     const now = Date.now();
     const last = dbUser.last_wheel_spin || 0;
     const dayMs = 24 * 60 * 60 * 1000;
@@ -1530,6 +1531,7 @@ async function handleMessage(env, message) {
   }
 
   if (mk === "referral") {
+    if (cfg.features?.referrals === false) { await sendMessage(env, chatId, "🤝 معرفی دوستان فعلاً غیرفعاله."); return; }
     const me = await tgCall(env, "getMe", {});
     const botUsername = me?.result?.username;
     const percent = await getSetting(env, "referral_percent", "10");
@@ -4408,15 +4410,64 @@ async function handleChatMemberUpdate(env, cm) {
 }
 
 // توابع داخلی که پنل وب ازشون استفاده می‌کنه (بدون وابستگی چرخشی)
+
+// خرید مستقیم از مینی‌اپ؛ همان موتور تحویل سفارش ربات استفاده می‌شود.
+async function purchaseMiniApp(env, userId, productId, gb = null, days = null, amountOverride = null) {
+  const product = await env.DB.prepare("SELECT * FROM products WHERE id=? AND enabled=1 AND is_trial=0").bind(productId).first();
+  if (!product) return { ok: false, error: "این محصول دیگر در دسترس نیست." };
+  let amount = Number(product.price || 0);
+  const custom = product.custom ? (() => { try { return JSON.parse(product.custom); } catch { return null; } })() : null;
+  if (custom) {
+    if (!product.panel_id) return { ok: false, error: "این محصول فعلاً قابل خرید نیست." };
+    gb = Number(gb); days = Number(days);
+    if (!Number.isFinite(gb) || !Number.isFinite(days) ||
+        gb < Number(custom.min_gb) || gb > Number(custom.max_gb) ||
+        days < Number(custom.min_days) || days > Number(custom.max_days)) {
+      return { ok: false, error: "حجم یا مدت انتخاب‌شده خارج از محدوده مجاز است." };
+    }
+    amount = Math.round(gb * Number(custom.price_per_gb || 0) + days * Number(custom.price_per_day || 0));
+  } else { gb = null; days = null; }
+  if (amountOverride !== null) amount = Number(amountOverride);
+  if (!Number.isSafeInteger(amount) || amount <= 0) return { ok: false, error: "قیمت محصول معتبر نیست." };
+  if (!product.panel_id) {
+    const stock = await env.DB.prepare("SELECT COUNT(*) n FROM configs WHERE product_id=? AND is_used=0").bind(productId).first();
+    if (!(Number(stock?.n) > 0)) return { ok: false, error: "موجودی این محصول تمام شده است." };
+  }
+  const debit = await env.DB.prepare("UPDATE users SET wallet_balance=wallet_balance-? WHERE id=? AND wallet_balance>=?")
+    .bind(amount, userId, amount).run();
+  if (!(debit.meta?.changes > 0)) return { ok: false, error: "موجودی کیف پول کافی نیست.", insufficient: true };
+  const username = product.panel_id ? `t${String(userId).slice(-8)}${Date.now().toString(36).slice(-6)}`.slice(0, 20) : null;
+  let orderId = null;
+  try {
+    const ins = await env.DB.prepare(
+      "INSERT INTO orders(user_id,product_id,type,amount,status,gb,days,panel_username,created_at) VALUES(?,?,'purchase',?,'pending',?,?,?,?)"
+    ).bind(userId, productId, amount, gb, days, username, Date.now()).run();
+    orderId = ins.meta.last_row_id;
+    const order = await env.DB.prepare("SELECT * FROM orders WHERE id=?").bind(orderId).first();
+    const result = await fulfillOrder(env, order);
+    if (!result.ok) {
+      await env.DB.prepare("UPDATE users SET wallet_balance=wallet_balance+? WHERE id=?").bind(amount, userId).run();
+      await env.DB.prepare("UPDATE orders SET status='rejected' WHERE id=?").bind(orderId).run();
+      return { ok: false, error: result.reason === "out_of_stock" ? "موجودی محصول تمام شده؛ مبلغ به کیف پول برگشت." : "ساخت سرویس ناموفق بود؛ مبلغ به کیف پول برگشت.", refunded: true };
+    }
+    return { ok: true, order_id: orderId, amount };
+  } catch (e) {
+    await env.DB.prepare("UPDATE users SET wallet_balance=wallet_balance+? WHERE id=?").bind(amount, userId).run().catch(() => {});
+    if (orderId) await env.DB.prepare("UPDATE orders SET status='rejected' WHERE id=?").bind(orderId).run().catch(() => {});
+    console.error("miniapp purchase", e);
+    return { ok: false, error: "ثبت سفارش انجام نشد؛ مبلغ به کیف پول برگشت." };
+  }
+}
+
 export const internals = {
   sendMessage, rawCall, escapeHtml, fmtMoney, isAdmin, reasonText,
   getSetting, setSetting, loadUiCfg, saveUiCfg, getLogCfg, saveLogCfg, logEvent, getUser, logUserTag,
-  fulfillOrder, ensureCatSchema, getPanel, getWheelPrizes, mainMenuKeyboard, clearPanelCache,
+  fulfillOrder, purchaseMiniApp, ensureCatSchema, getPanel, getWheelPrizes, mainMenuKeyboard, clearPanelCache,
   MENU_ITEMS, DEFAULT_MENU_LAYOUT, LOG_TOPICS, DEFAULT_RULES_TEXT, DEFAULT_RULES_BTN, DEFAULT_WELCOME_TEXT, DEFAULT_WELCOME_BACK_TEXT, VALID_STYLES,
   PANEL_TYPES, panelTest, isIpHost,
   startBroadcast, stopBroadcast, runBroadcastTick, stateGet, stateDelete,
   loadSvcNames, loadExtForUser, listProducts, listCategories, panelUsage, panelFindUser,
-  dumpDatabaseSql, gzipText, sendBackupToLog,
+  dumpDatabaseSql, gzipText, sendBackupToLog, performTransfer, findTransferTarget,
 };
 
 // ---------- Worker entry ----------

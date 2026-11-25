@@ -649,6 +649,7 @@ R("GET", "/api/settings", async ({ env, I }) => {
     ui: {
       menu: ui.menu, roles: ui.roles, rules_enabled: ui.rules_enabled !== false, rules_text: ui.rules_text || "", rules_btn: ui.rules_btn || "",
       qr_enabled: ui.qr_enabled !== false, ext_verify: ui.ext_verify !== false, transfer_enabled: ui.transfer_enabled !== false,
+      features: { coupons: ui.features?.coupons !== false, wheel: ui.features?.wheel !== false, referrals: ui.features?.referrals !== false, tickets: ui.features?.tickets !== false },
       welcome_text: ui.welcome_text || "", welcome_back_text: ui.welcome_back_text || "",
       layout: Array.isArray(ui.layout) ? ui.layout : null,
       miniapp: { ...miniappCfg(ui), url: ORIGIN ? `${ORIGIN}/app` : "", https: ORIGIN.startsWith("https://"), accents: MINIAPP_ACCENTS },
@@ -720,6 +721,7 @@ R("POST", "/api/settings", async ({ env, body, I, session }) => {
     if ("qr_enabled" in u) cfg.qr_enabled = !!u.qr_enabled;
     if ("ext_verify" in u) cfg.ext_verify = !!u.ext_verify;
     if ("transfer_enabled" in u) cfg.transfer_enabled = !!u.transfer_enabled;
+    if (u.features && typeof u.features === "object") { cfg.features = { ...(cfg.features || {}) }; for (const k of ["coupons","wheel","referrals","tickets"]) if (k in u.features) cfg.features[k] = !!u.features[k]; }
     if (u.miniapp && typeof u.miniapp === "object") {
       const m = u.miniapp, cur = miniappCfg(cfg), wasOn = cur.enabled;
       const next = { ...cur };

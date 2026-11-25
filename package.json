@@ -1,6 +1,6 @@
 {
   "name": "vpnbot",
-  "version": "2.1.0",
+  "version": "2.3.1",
   "private": true,
   "type": "module",
   "description": "ربات فروش کانفیگ تلگرام — Cloudflare Workers یا Railway",
@@ -12,6 +12,6 @@
     "start": "node --no-warnings server.js",
     "import": "node --no-warnings scripts/import-sql.js",
     "build:ui": "node scripts/build-ui.mjs",
-    "test": "node --no-warnings scripts/test-v6.mjs"
+    "test": "node --no-warnings scripts/test-v6.mjs && node --no-warnings scripts/test-miniapp-v23.mjs"
   }
 }

@@ -42,23 +42,38 @@ function safeHtml(src){
 
 /* ============ API (و حالت نمایشی) ============ */
 const S={tab:"home",data:null,plans:null,wallet:null,usage:{},wf:"all",cat:0,ready:false};
-async function api(path){
+async function api(path, options={}){
   if(DEMO)return demoApi(path);
-  const r=await fetch("/app/api"+path,{headers:{Authorization:"tma "+initData()},cache:"no-store"});
+  const headers={Authorization:"tma "+initData(),...(options.body?{"Content-Type":"application/json"}:{})};
+  const r=await fetch("/app/api"+path,{...options,headers,cache:"no-store"});
   const j=await r.json().catch(()=>({ok:false,error:"پاسخ نامعتبر"}));
   if(!r.ok||j.ok===false){const e=new Error(j.error||"خطا");e.status=r.status;e.body=j;throw e}
   return j;
+}
+async function uploadReceipt(orderId,file){
+  if(DEMO)return {ok:true,order_id:orderId,status:"pending"};
+  const fd=new FormData();fd.set("order_id",String(orderId));fd.set("receipt",file,file.name||"receipt.jpg");
+  const r=await fetch("/app/api/receipt",{method:"POST",headers:{Authorization:"tma "+initData()},body:fd,cache:"no-store"});
+  const j=await r.json().catch(()=>({ok:false,error:"پاسخ نامعتبر"}));if(!r.ok||j.ok===false)throw new Error(j.error||"ارسال رسید ناموفق بود");return j;
 }
 const NOW=Date.now();
 async function demoApi(path){
   await sleep(path.startsWith("/service")?650:300);
   const q=new URLSearchParams(path.split("?")[1]||"");
-  if(path.startsWith("/bootstrap"))return{ok:true,registered:true,maintenance:{on:false},user:{id:123456789,name:"علی",username:"ali_demo",wallet:1250000,referrals:7,admin:false},app:{title:"تاتا وی‌پی‌ان",accent:document.documentElement.dataset.accent,banner:"🎁 تخفیف ویژه‌ی شب یلدا: ۲۰٪ روی همه‌ی پلن‌های سه‌ماهه",sections:{shop:true,wallet:true,referral:true,support:true}},bot:{username:"demo_bot",name:"تاتا"},percent:10,refLink:"https://t.me/demo_bot?start=123456789",transferEnabled:true,
+  if(path.startsWith("/bootstrap"))return{ok:true,registered:true,maintenance:{on:false},user:{id:123456789,name:"علی",username:"ali_demo",wallet:1250000,referrals:7,admin:false},app:{title:"تاتا وی‌پی‌ان",accent:document.documentElement.dataset.accent,banner:"🎁 تخفیف ویژه‌ی شب یلدا: ۲۰٪ روی همه‌ی پلن‌های سه‌ماهه",sections:{shop:true,wallet:true,referral:true,support:true}},bot:{username:"demo_bot",name:"تاتا"},percent:10,payment:{card_number:"6037-0000-0000-0000",card_holder:"تاتا وی‌پی‌ان"},refLink:"https://t.me/demo_bot?start=123456789",transferEnabled:true,
     services:[{kind:"o",id:1,title:"ali_premium",product:"پلن ۱۰۰ گیگ سه‌ماهه",live:true,renewable:true,free:false},{kind:"o",id:2,title:"دوستم‌ - ۵۰ گیگ",product:"پلن ۵۰ گیگ یک‌ماهه",live:true,renewable:true,free:false},{kind:"o",id:3,title:"کانفیگ ثابت ایران",product:"کانفیگ تانل",live:false,renewable:false,free:false},{kind:"e",id:4,title:"old_user_77",product:"اشتراک قبلی",live:true,renewable:true,free:false}],
     texts:{support:"📞 پشتیبانی: @support_demo\n⏰ ساعت پاسخگویی: ۹ تا ۲۱",tutorial:"1️⃣ برنامه‌ی <b>v2rayNG</b> (اندروید) یا <b>Streisand</b> (iOS) رو نصب کن.\n2️⃣ لینک اشتراک رو کپی کن و داخل برنامه Import بزن.\n3️⃣ روی دکمه‌ی اتصال بزن و لذت ببر 🚀"}};
   if(path.startsWith("/service/qr"))return null;
   if(path.startsWith("/service")){const id=+q.get("id"),m={1:{total:100*GB,used:38*GB,expire:(NOW+51*864e5)/1000},2:{total:50*GB,used:46.5*GB,expire:(NOW+2*864e5)/1000},4:{total:0,used:12*GB,expire:0}}[id];
     return{ok:true,kind:q.get("kind"),id,title:{1:"ali_premium",2:"دوستم‌ - ۵۰ گیگ",3:"کانفیگ ثابت ایران",4:"old_user_77"}[id],product:{1:"پلن ۱۰۰ گیگ سه‌ماهه",2:"پلن ۵۰ گیگ یک‌ماهه",3:"کانفیگ تانل",4:"اشتراک قبلی"}[id],free:false,renewable:id!==3,transferable:true,usage:m?{...m,status:"active"}:null,usageErr:false,link:"https://sub.example.com/sub/"+id+"x9Qk2LmPz",isSub:true,qr:true}}
+  if(path.startsWith("/purchase"))return{ok:true,order_id:99,amount:90000,wallet:1160000};
+  if(path.startsWith("/purchase-card"))return{ok:true,order_id:100,amount:90000,card_number:"6037-0000-0000-0000",card_holder:"تاتا وی‌پی‌ان"};
+  if(path.startsWith("/topup"))return{ok:true,order_id:101,amount:100000,card_number:"6037-0000-0000-0000",card_holder:"تاتا وی‌پی‌ان"};
+  if(path.startsWith("/renew-options"))return{ok:true,username:"ali_premium",items:[{id:1,name:"۳۰ گیگ یک‌ماهه",price:90000,days:30,gb:30}]};
+  if(path.startsWith("/renew"))return{ok:true,order_id:102,wallet:1160000};
+  if(path.startsWith("/topup"))return{ok:true,order_id:101,amount:100000,card_number:"6037-0000-0000-0000",card_holder:"تاتا وی‌پی‌ان"};
+  if(path.startsWith("/renew-options"))return{ok:true,username:"ali_premium",items:[{id:1,name:"۳۰ گیگ یک‌ماهه",price:90000,days:30,gb:30},{id:2,name:"۱۰۰ گیگ سه‌ماهه",price:240000,days:90,gb:100}]};
+  if(path.startsWith("/renew"))return{ok:true,order_id:102,wallet:1160000};
   if(path.startsWith("/plans"))return{ok:true,best:2,categories:[{id:1,name:"🚀 پرسرعت",count:3},{id:2,name:"🏝 اقتصادی",count:2}],hasOthers:false,items:[
     {id:1,name:"۳۰ گیگ یک‌ماهه",price:90000,days:30,gb:30,cat:1,desc:"مناسب مصرف روزمره و شبکه‌های اجتماعی",panel:true,custom:null,soldOut:false},
     {id:2,name:"۱۰۰ گیگ سه‌ماهه",price:240000,days:90,gb:100,cat:1,desc:"پرطرفدارترین؛ مناسب خانواده",panel:true,custom:null,soldOut:false},
@@ -74,8 +89,8 @@ async function demoApi(path){
 
 /* ============ مصرف و وضعیت سرویس ============ */
 function svcState(d){
-  if(!d||!d.usage)return{k:"mut",label:d&&d.usageErr?"نامشخص":"…",pct:1,left:null,days:null,unlimited:!d,c1:"var(--a1)",c2:"var(--a2)"};
-  const u=d.usage,now=Date.now(),exp=u.expire?u.expire*1000:0,total=u.total||0,left=total?Math.max(0,total-u.used):null,pct=total?left/total:1,days=exp?Math.ceil((exp-now)/864e5):null;
+  if(!d||!d.usage)return{k:"mut",label:d&&d.usageErr?"نامشخص":"…",pct:0,left:null,days:null,unlimited:false,c1:"var(--a1)",c2:"var(--a2)"};
+  const u=d.usage,now=Date.now(),exp=u.expire?u.expire*1000:0,total=Number(u.total)||0,left=total?Math.max(0,total-(Number(u.used)||0)):null,pct=total?left/total:0.04,days=exp?Math.ceil((exp-now)/864e5):null;
   let k="ok",label="فعال";
   if(u.status&&!["active","on_hold",""].includes(u.status)){k="bad";label=u.status==="expired"?"منقضی":u.status==="limited"?"حجم تمام":"غیرفعال"}
   else if((exp&&exp<now)){k="bad";label="منقضی"}
@@ -98,7 +113,7 @@ function svcCard(sv,i=0,compact=false){
   if(!sv.live)body=`<div class="body"><div class="ringbox" style="display:grid;place-items:center;color:var(--a2)">${ic("link","")}</div><div class="facts" style="grid-template-columns:1fr"><div class="fact"><small>نوع سرویس</small><b>کانفیگ دستی</b></div><div class="fact"><small>مشاهده‌ی لینک</small><b>ضربه بزن ←</b></div></div></div>`;
   else if(loading)body=`<div class="body"><div class="ringbox"><div class="skl" style="width:86px;height:86px;border-radius:50%"></div></div><div class="facts"><div class="skl" style="height:46px"></div><div class="skl" style="height:46px"></div><div class="skl" style="height:46px"></div><div class="skl" style="height:46px"></div></div></div>`;
   else if(!d.usage)body=`<div class="body"><div class="ringbox" style="display:grid;place-items:center;color:var(--warn)">${ic("clock")}</div><div class="facts" style="grid-template-columns:1fr"><div class="fact"><small>وضعیت</small><b>اطلاعات مصرف در دسترس نیست</b></div></div></div>`;
-  else body=`<div class="body"><div class="ringbox">${ring(st.pct,st.c1,st.c2,`<div class="c"><b class="num">${st.unlimited?ic("infinity"):fa(Math.round(st.pct*100))+"٪"}</b><small>${st.unlimited?"نامحدود":"باقی‌مانده"}</small></div>`)}</div>
+  else body=`<div class="body"><div class="ringbox">${ring(st.pct,st.c1,st.c2,`<div class="c"><b class="num">${st.unlimited?"∞":fa(Math.round(st.pct*100))+"٪"}</b><small>${st.unlimited?"نامحدود":"باقی‌مانده"}</small></div>`)}</div>
     <div class="facts"><div class="fact"><small>حجم باقی</small><b class="num">${st.unlimited?"نامحدود":fmtGB(st.left)+" گیگ"}</b></div><div class="fact hc"><small>مصرف‌شده</small><b class="num">${fmtGB(st.used)} گیگ</b></div><div class="fact" style="grid-column:1/-1"><small>زمان باقی‌مانده</small><b class="num">${st.days===null?"نامحدود":st.days<=0?"تمام شده":fa(st.days)+" روز"}</b></div></div></div>`;
   return `<div class="card svc ${compact?"compact":""}" data-act="svc" data-k="${key(sv)}" style="--i:${i};--c1:${st.c1};--c2:${st.c2}"><div class="hd"><div class="t"><b>${esc(sv.title)}</b><small>${esc(sv.product||"")}</small></div><span class="pillst st-${st.k}">${esc(sv.live?(loading?"…":st.label):"فعال")}</span></div>${body}</div>`;
 }
@@ -131,7 +146,7 @@ function planCard(p,i){
     <div class="row"><div class="lab"><span>حجم</span><em class="num" data-v="gb">${fa(c.min_gb)} گیگ</em></div><input type="range" data-r="gb" min="${c.min_gb}" max="${c.max_gb}" step="${c.max_gb-c.min_gb>200?5:1}" value="${c.min_gb}"></div>
     <div class="row"><div class="lab"><span>مدت</span><em class="num" data-v="days">${fa(c.min_days)} روز</em></div><input type="range" data-r="days" min="${c.min_days}" max="${c.max_days}" step="1" value="${c.min_days}"></div>
     <div class="pr"><b class="num" data-v="price">${fa(Math.round(c.min_gb*c.price_per_gb+c.min_days*c.price_per_day))}</b><span>تومان</span></div>
-    <button class="btn pri block" data-act="buy" data-id="${p.id}">${ic("zap")}ادامه در ربات</button></div>`}
+    <button class="btn pri block" data-act="buy" data-id="${p.id}">${ic("zap")}ادامه خرید</button></div>`}
   return `<div class="card plan ${best?"best":""} ${p.soldOut?"sold":""}" style="--i:${i}">${best?`<div class="badge">🔥 پرفروش</div>`:""}<div class="nm">${esc(p.name)}</div><div class="ds">${esc(p.desc||"")}</div>
     <div class="meta"><span class="mp">${ic("clock")}${fa(p.days)} روز</span><span class="mp">${ic("zap")}${p.gb?fa(p.gb)+" گیگ":"نامحدود"}</span>${p.panel?`<span class="mp">${ic("check")}تحویل آنی</span>`:""}</div>
     <div class="pr"><b class="num">${fa(p.price)}</b><span>تومان</span></div>
@@ -156,10 +171,14 @@ function viewWallet(){
     const t=TXT[x.type]||["تراکنش","out","bag"],pend=["pending","awaiting_receipt"].includes(x.status),rej=x.status==="rejected";
     list+=`<div class="tx ${t[1]}" style="--i:${Math.min(i,10)}"><div class="i">${ic(t[2])}</div><div class="m"><b>${esc(t[0])}${x.name?" "+esc(x.name):""}</b><small>${timeLabel(x.at)}</small></div><div class="a num">${x.type==="topup"?"+":"−"}${fa(x.amount)}<small class="pillst ${rej?"st-bad":pend?"st-warn":"st-mut"}" style="display:inline-block;margin-top:2px">${rej?"رد شده":pend?"در انتظار تایید":x.type==="topup"?"واریز شد":"پرداخت شد"}</small></div></div>`});
   return `<div class="view">${header()}<div class="stagger"><div style="--i:0">${bal}</div>
-  <div class="presets" style="--i:1">${[50000,100000,200000,500000].map(a=>`<button class="preset" data-act="topup"><span class="num">${fa(a)}</span><small>تومان</small></button>`).join("")}</div>
+  <div class="presets" style="--i:1">${[50000,100000,200000,500000].map(a=>`<button class="preset" data-act="topup" data-amount="${a}"><span class="num">${fa(a)}</span><small>تومان</small></button>`).join("")}</div>
   <div class="seg" style="--i:2">${[["all","همه"],["in","شارژ"],["out","خرید و تمدید"]].map(x=>`<button class="${S.wf===x[0]?"on":""}" data-act="wf" data-f="${x[0]}">${x[1]}</button>`).join("")}</div></div>
   ${items.length?`<div class="stagger">${list}</div>`:`<div class="card">${emptyBox("wallet","تراکنشی ثبت نشده","بعد از اولین شارژ یا خرید اینجا می‌بینی.")}</div>`}</div>`;
 }
+async function openTransfer(k){const [kind,id]=k.split(":");openSheet(`<h3>انتقال سرویس</h3><p class="muted">آیدی عددی یا یوزرنیم گیرنده را وارد کن. گیرنده باید قبلاً ربات را استارت کرده باشد.</p><input id="transferTarget" placeholder="آیدی عددی یا @username" style="width:100%;padding:14px;margin:14px 0;border-radius:12px;background:var(--card);color:var(--tx);border:1px solid var(--bd)"><button class="btn pri block" id="transferConfirm">ادامه</button>`);$("#transferConfirm")?.addEventListener("click",async()=>{const b=$("#transferConfirm"),target=$("#transferTarget").value.trim();if(!target)return toast("گیرنده را وارد کن");b.disabled=true;try{const r=await api("/transfer",{method:"POST",body:JSON.stringify({kind,id:Number(id),target})});openSheet(`<div style="text-align:center;padding:22px 4px"><div class="big" style="color:var(--ok)">✓</div><h2>انتقال انجام شد</h2><p class="muted">${esc(r.label)} به ${esc(r.to)} منتقل شد.</p><button class="btn pri block" id="transferDone">بازگشت به سرویس‌ها</button></div>`);$("#transferDone")?.addEventListener("click",async()=>{const b=await api("/bootstrap");S.data={...S.data,...b};closeSheet();setTab("services")})}catch(e){b.disabled=false;toast(e.message)}})}
+
+async function openTickets(){openSheet(`<h3>پشتیبانی</h3><div class="skl" style="height:70px;margin:12px 0"></div>`);try{const r=await api("/tickets");openSheet(`<div class="sheethead"><h3>تیکت‌های پشتیبانی</h3><p>پیگیری و ارسال پیام بدون خروج از مینی‌اپ</p></div><button class="btn pri block" id="newticket">ثبت تیکت جدید</button><div style="margin-top:14px">${r.items.length?r.items.map(t=>`<button class="card pad block" data-ticket="${t.id}" style="text-align:right;width:100%;margin-bottom:8px"><b>#${t.id} · ${esc(t.subject)}</b><div class="muted">${t.status==="closed"?"بسته":t.status==="pending"?"پاسخ داده شده":"در انتظار پاسخ"} · ${esc(t.last_message||"")}</div></button>`).join(""):`<div class="card pad muted">هنوز تیکتی ثبت نکردی.</div>`}</div>`);$("#newticket")?.addEventListener("click",()=>{openSheet(`<h3>تیکت جدید</h3><input id="ticketsubject" maxlength="120" placeholder="موضوع" style="width:100%;padding:12px;margin:12px 0;border-radius:12px;background:var(--card);color:var(--tx);border:1px solid var(--bd)"><textarea id="ticketmessage" maxlength="3500" placeholder="متن پیام" style="width:100%;min-height:120px;padding:12px;border-radius:12px;background:var(--card);color:var(--tx);border:1px solid var(--bd);font:inherit"></textarea><button class="btn pri block" id="submitticket" style="margin-top:12px">ارسال تیکت</button>`);$("#submitticket")?.addEventListener("click",async()=>{const b=$("#submitticket");b.disabled=true;try{await api("/tickets",{method:"POST",body:JSON.stringify({subject:$("#ticketsubject").value,message:$("#ticketmessage").value})});toast("تیکت ثبت شد");openTickets()}catch(e){b.disabled=false;toast(e.message)}})});$$('[data-ticket]',$("#sheet")).forEach(b=>b.onclick=async()=>{try{const d=await api(`/tickets/${b.dataset.ticket}`);openSheet(`<h3>تیکت #${d.ticket.id}</h3><b>${esc(d.ticket.subject)}</b><div style="margin:14px 0">${d.messages.map(m=>`<div class="card pad" style="margin-bottom:8px"><small class="muted">${m.sender_type==="admin"?"پشتیبانی":"شما"}</small><p>${esc(m.message)}</p></div>`).join("")}</div><textarea id="ticketreply" maxlength="3500" placeholder="پیام جدید برای پشتیبانی" style="width:100%;min-height:85px;padding:12px;border-radius:12px;background:var(--card);color:var(--tx);border:1px solid var(--bd);font:inherit"></textarea><button class="btn pri block" id="sendticketreply" style="margin-top:8px" ${d.ticket.status==="closed"?"disabled":""}>ارسال پیام</button><button class="btn full" id="backtickets" style="margin-top:8px">بازگشت</button>`);$("#sendticketreply")?.addEventListener("click",async()=>{const b=$("#sendticketreply");b.disabled=true;try{await api(`/tickets/${d.ticket.id}/reply`,{method:"POST",body:JSON.stringify({message:$("#ticketreply").value})});toast("پیام ارسال شد");openTickets()}catch(e){b.disabled=false;toast(e.message)}});$("#backtickets")?.addEventListener("click",openTickets)}catch(e){toast(e.message)}})}catch(e){openSheet(`<h3>خطا</h3><p>${esc(e.message)}</p>`)} }
+
 function viewMore(){
   const D=S.data,u=D.user,a=D.app;let h=`<div class="view stagger">${header()}`;
   if(a.sections.referral)h+=`<div class="card ref" id="refcard" style="--i:0"><h3 style="font-size:16px;font-weight:900;margin-bottom:4px">${ic("gift")} دعوت دوستان</h3><div style="color:var(--mut);font-size:13px">دوستانت رو با لینک اختصاصی‌ات دعوت کن؛ پورسانت زیرمجموعه‌گیری: <b class="num" style="color:var(--a2)">${fa(D.percent)}٪</b></div>
@@ -168,6 +187,7 @@ function viewMore(){
     <div class="stats" style="margin-top:14px"><div class="stat"><b class="num">${fa(u.referrals)}</b><small>زیرمجموعه</small></div><div class="stat"><b class="num">${fa(D.percent)}٪</b><small>درصد پورسانت</small></div></div></div>`;
   if(a.sections.support&&D.texts&&D.texts.support)h+=`<h2 class="sec" id="helpsec" style="--i:1">${ic("help")}پشتیبانی</h2><div class="card pad txt" style="--i:2">${safeHtml(D.texts.support)}</div>`;
   if(a.sections.support&&D.texts&&D.texts.tutorial)h+=`<h2 class="sec" style="--i:3">${ic("book")}آموزش اتصال</h2><div class="card pad txt" style="--i:4">${safeHtml(D.texts.tutorial)}</div>`;
+  if(a.sections.support)h+=`<button class="btn pri block" data-act="tickets" style="margin-top:16px">${ic("help")}تیکت‌های پشتیبانی</button>`;
   h+=`<h2 class="sec" style="--i:5">${ic("shield")}درباره</h2><div class="list" style="--i:6"><button class="row2" data-act="copyid"><span class="i">${ic("users")}</span><span class="m"><b>شناسه‌ی عددی شما</b><small class="num ltr">${u.id}</small></span>${ic("copy")}</button>
   <button class="row2" data-act="openbot"><span class="i">${ic("bot")}</span><span class="m"><b>بازگشت به ربات</b><small>@${esc((D.bot&&D.bot.username)||"")}</small></span>${ic("left")}</button></div></div>`;
   return h;
@@ -212,7 +232,7 @@ async function openService(k){
   S.usage[k]=d;if(S.tab==="home"||S.tab==="services")repaintSvc(k);
   if(!sheetOpen)return;
   const st=svcState(d);
-  const big=d.usage?`<div class="bigring">${ring(st.pct,st.c1,st.c2,`<div class="c"><b class="num">${st.unlimited?ic("infinity"):fa(Math.round(st.pct*100))+"٪"}</b><small>${st.unlimited?"حجم نامحدود":"باقی‌مانده"}</small></div>`)}</div>
+  const big=d.usage?`<div class="bigring">${ring(st.pct,st.c1,st.c2,`<div class="c"><b class="num">${st.unlimited?"∞":fa(Math.round(st.pct*100))+"٪"}</b><small>${st.unlimited?"حجم نامحدود":"باقی‌مانده"}</small></div>`)}</div>
     <div style="text-align:center"><span class="pillst st-${st.k}">${esc(st.label)}</span></div>
     <div class="grid4"><div class="fact"><small>حجم کل</small><b class="num">${st.unlimited?"نامحدود":fmtGB(st.total)+" گیگ"}</b></div><div class="fact"><small>مصرف‌شده</small><b class="num">${fmtGB(st.used)} گیگ</b></div><div class="fact"><small>باقی‌مانده</small><b class="num">${st.unlimited?"نامحدود":fmtGB(st.left)+" گیگ"}</b></div><div class="fact"><small>انقضا</small><b class="num">${st.exp?dateFull(st.exp):"نامحدود"}</b></div></div>`
     :`<div class="card pad" style="margin:14px 0;text-align:center;color:var(--mut)">${d.usageErr?"الان نتونستم مصرف سرویس رو از پنل بگیرم؛ کمی بعد دوباره امتحان کن.":"این سرویس اطلاعات مصرف ندارد."}</div>`;
@@ -233,14 +253,70 @@ async function showQR(k){
 function repaintSvc(k){const sv=S.data.services.find(s=>key(s)===k);if(!sv)return;$$(`.svc[data-k="${k}"]`).forEach(el=>{const t=document.createElement("div");t.innerHTML=svcCard(sv,0,el.classList.contains("compact"));const n=t.firstElementChild;n.style.animation="none";n.style.opacity="1";el.replaceWith(n)});animateRings(app())}
 
 /* ============ اکشن‌ها ============ */
+async function receiptPicker(orderId,amount,cardNumber,cardHolder){
+ openSheet(`<div class="sheethead"><h3>پرداخت کارت‌به‌کارت</h3><p>سفارش #${orderId}</p></div><div class="card pad" style="margin:14px 0"><div class="fact"><small>مبلغ</small><b class="num">${fa(amount)} تومان</b></div><div class="fact"><small>شماره کارت</small><b class="num ltr">${esc(cardNumber||"تنظیم نشده")}</b></div><div class="fact"><small>به نام</small><b>${esc(cardHolder||"")}</b></div><button class="btn full" id="copycard" style="margin-top:8px">کپی شماره کارت</button></div><p class="muted" style="font-size:12px">پس از واریز، تصویر رسید را انتخاب کن.</p><input id="receiptfile" type="file" accept="image/jpeg,image/png,image/webp" style="width:100%;padding:12px;border:1px dashed var(--bd);border-radius:14px;background:var(--card);color:var(--tx)"><button class="btn pri block" id="sendreceipt" style="margin-top:14px">ارسال رسید</button>`);
+ $("#copycard")?.addEventListener("click",()=>copy(cardNumber||"","شماره کارت کپی شد"));$("#sendreceipt")?.addEventListener("click",async()=>{const f=$("#receiptfile")?.files?.[0],b=$("#sendreceipt");if(!f)return toast("تصویر رسید را انتخاب کن");if(f.size>8*1024*1024)return toast("حداکثر حجم تصویر ۸ مگابایت است");b.disabled=true;b.textContent="در حال ارسال…";try{await uploadReceipt(orderId,f);openSheet(`<div style="text-align:center;padding:24px 4px"><div class="big" style="color:var(--ok)">✓</div><h2>رسید ارسال شد</h2><p class="muted">سفارش #${orderId} در انتظار تأیید مدیر است.</p><button class="btn pri block" id="receiptwallet" style="margin-top:16px">تاریخچه پرداخت‌ها</button></div>`);$("#receiptwallet")?.addEventListener("click",()=>{closeSheet();S.wallet=null;setTab("wallet")})}catch(e){b.disabled=false;b.textContent="تلاش دوباره";toast(e.message)}});
+}
+async function openTopup(preset=0){openSheet(`<div class="sheethead"><h3>شارژ کیف پول</h3><p>مبلغ دلخواه به تومان</p></div><input id="topupamount" type="number" min="10000" max="50000000" step="1000" value="${preset||""}" placeholder="مثلاً ۱۰۰۰۰۰" style="width:100%;padding:15px;border-radius:14px;border:1px solid var(--bd);background:var(--card);color:var(--tx);font:inherit;margin:14px 0"><div class="presets">${[50000,100000,200000,500000].map(x=>`<button class="preset" data-amount="${x}">${fa(x)}<small>تومان</small></button>`).join("")}</div><button class="btn pri block" id="createtopup" style="margin-top:14px">ادامه</button>`);$$("[data-amount]",$("#sheet")).forEach(b=>b.onclick=()=>$("#topupamount").value=b.dataset.amount);$("#createtopup")?.addEventListener("click",async()=>{const b=$("#createtopup"),amount=Number($("#topupamount").value);if(!Number.isSafeInteger(amount)||amount<10000)return toast("حداقل شارژ ۱۰ هزار تومان است");b.disabled=true;try{const r=await api("/topup",{method:"POST",body:JSON.stringify({amount})});receiptPicker(r.order_id,r.amount,r.card_number,r.card_holder)}catch(e){b.disabled=false;toast(e.message)}})}
+
+async function openRenew(k){
+  const [kind,id]=k.split(":");openSheet(`<h3>انتخاب پلن تمدید</h3><div class="skl" style="height:100px;margin:14px 0"></div>`);
+  try{const r=await api(`/renew-options?kind=${kind}&id=${id}`);if(!r.items.length){openSheet(`<h3>پلن تمدید موجود نیست</h3><p class="muted">برای این پنل محصول سازگار ثبت نشده است.</p>`);return}
+    openSheet(`<h3>تمدید ${esc(r.username)}</h3><p class="muted">پلن موردنظر را انتخاب کن.</p><div class="stagger" style="margin-top:12px">${r.items.map(x=>x.custom?`<div class="card pad" style="margin-bottom:9px"><b>${esc(x.name)}</b><div class="muted">حجم <input id="rg${x.id}" type="number" min="${x.min_gb}" max="${x.max_gb}" value="${x.min_gb}" style="width:76px;background:var(--card);color:var(--tx)"> گیگ · مدت <input id="rd${x.id}" type="number" min="${x.min_days}" max="${x.max_days}" value="${x.min_days}" style="width:76px;background:var(--card);color:var(--tx)"> روز</div><button class="btn pri block" data-rp="${x.id}" style="margin-top:8px">انتخاب</button></div>`:`<button class="card pad block" data-rp="${x.id}" style="text-align:right;margin-bottom:9px;width:100%"><b>${esc(x.name)}</b><div class="muted">${x.gb?fa(x.gb)+" گیگ":"نامحدود"} · ${fa(x.days)} روز</div><b class="num">${fa(x.price)} تومان</b></button>`).join("")}</div>`);
+    $$("[data-rp]",$("#sheet")).forEach(b=>b.onclick=()=>{const x=r.items.find(y=>y.id===Number(b.dataset.rp));if(x.custom){x.gb=Number($("#rg"+x.id).value);x.days=Number($("#rd"+x.id).value);if(x.gb<x.min_gb||x.gb>x.max_gb||x.days<x.min_days||x.days>x.max_days)return toast("حجم یا مدت خارج از محدوده است");x.price=Math.round(x.gb*x.price_per_gb+x.days*x.price_per_day)}confirmRenew(kind,id,x.id,x)});
+  }catch(e){openSheet(`<h3>خطا در دریافت پلن‌ها</h3><p class="muted">${esc(e.message)}</p>`)}
+}
+async function confirmRenew(kind,serviceId,productId,product){
+  openSheet(`<h3>روش پرداخت تمدید</h3><div class="card pad" style="margin:14px 0"><b>${esc(product.name)}</b><div class="muted">${fa(product.days)} روز · ${product.gb?fa(product.gb)+" گیگ":"نامحدود"}</div><h2 class="num" style="margin-top:8px">${fa(product.price)} تومان</h2></div><button class="btn pri block" id="renewwallet">پرداخت از کیف پول (${fa(S.data.user.wallet)} تومان)</button><button class="btn block" id="renewcard" style="margin-top:9px">پرداخت کارت‌به‌کارت</button>`);
+  const pay=async method=>{const b=method==="wallet"?$("#renewwallet"):$("#renewcard");b.disabled=true;b.textContent="در حال ثبت سفارش…";try{const r=await api("/renew",{method:"POST",body:JSON.stringify({kind,service_id:Number(serviceId),product_id:productId,method,gb:product.gb,days:product.days})});if(method==="card")return receiptPicker(r.order_id,r.amount,r.card_number,r.card_holder);S.data.user.wallet=r.wallet;S.wallet=null;const fresh=await api("/bootstrap");S.data={...S.data,...fresh};openSheet(`<div style="text-align:center;padding:22px 4px"><div class="big" style="color:var(--ok)">✓</div><h2>تمدید با موفقیت انجام شد</h2><p class="muted">اشتراک شما تمدید شد.</p><button class="btn pri block" id="renewdone">بازگشت به سرویس‌ها</button></div>`);$("#renewdone")?.addEventListener("click",()=>{closeSheet();setTab("services")})}catch(e){b.disabled=false;b.textContent="تلاش دوباره";toast(e.message||"تمدید ناموفق بود")}};
+  $("#renewwallet")?.addEventListener("click",()=>pay("wallet"));$("#renewcard")?.addEventListener("click",()=>pay("card"));
+}
+
+async function checkoutProduct(el){
+  const id=Number(el.dataset.id),product=S.plans?.items?.find(x=>x.id===id);
+  if(!product)return toast("محصول پیدا نشد");
+  const card=el.closest("[data-cid]"),gb=product.custom?Number($('[data-r="gb"]',card)?.value):null,days=product.custom?Number($('[data-r="days"]',card)?.value):null;
+  const amount=product.custom?Math.round(gb*product.custom.price_per_gb+days*product.custom.price_per_day):Number(product.price);
+  let couponCode="", finalAmount=amount;
+  openSheet(`<div class="sheethead"><h3>تأیید سفارش</h3><p>${esc(product.name)}</p></div>
+    <div class="card pad" style="margin:14px 0"><div class="fact"><small>حجم</small><b>${product.custom?fa(gb)+" گیگ":product.gb?fa(product.gb)+" گیگ":"نامحدود"}</b></div><div class="fact"><small>مدت</small><b>${fa(product.custom?days:product.days)} روز</b></div><div class="fact"><small>قیمت محصول</small><b class="num">${fa(amount)} تومان</b></div><div class="fact" id="discountrow" style="display:none"><small>تخفیف</small><b class="num" id="discountvalue">۰ تومان</b></div><div class="fact"><small>مبلغ نهایی</small><b class="num" id="finalamount">${fa(amount)} تومان</b></div><div class="fact"><small>موجودی کیف پول</small><b class="num">${fa(S.data.user.wallet)} تومان</b></div></div>
+    <div style="display:flex;gap:8px;margin:12px 0"><input id="couponinput" placeholder="کد تخفیف" autocomplete="off" style="min-width:0;flex:1;padding:12px;border-radius:12px;border:1px solid var(--bd);background:var(--card);color:var(--tx);font:inherit"><button class="btn" id="applycoupon">اعمال کد</button></div><div id="couponmsg" class="muted" style="font-size:12px;min-height:20px"></div>
+    <div class="note">کد تخفیف قبل از ثبت سفارش اعتبارسنجی می‌شود. پس از پرداخت، سرویس به‌صورت خودکار ساخته می‌شود.</div>
+    <button class="btn pri block" id="confirmbuy" style="margin-top:16px" ${S.data.user.wallet<amount?"disabled":""}>${ic("lock")}پرداخت از کیف پول</button><button class="btn block" id="confirmbuycard" style="margin-top:9px">پرداخت کارت‌به‌کارت</button>
+    ${S.data.user.wallet<amount?'<p class="muted" style="text-align:center;margin-top:10px">موجودی کافی نیست؛ می‌تونی کارت‌به‌کارت پرداخت کنی.</p>':""}`);
+  const btn=$("#confirmbuy");if(!btn)return;
+  const syncPay=()=>{const enough=S.data.user.wallet>=finalAmount;btn.disabled=!enough;btn.innerHTML=enough?ic("lock")+"پرداخت از کیف پول": "موجودی کیف پول کافی نیست";$("#finalamount").textContent=fa(finalAmount)+" تومان"};
+  $("#applycoupon")?.addEventListener("click",async()=>{const b=$("#applycoupon"),code=$("#couponinput").value.trim();if(!code){couponCode="";finalAmount=amount;$("#discountrow").style.display="none";$("#couponmsg").textContent="کد تخفیف حذف شد.";syncPay();return}b.disabled=true;b.textContent="بررسی…";try{const r=await api("/coupon-check",{method:"POST",body:JSON.stringify({code,product_id:id,gb,days})});couponCode=r.code;finalAmount=r.amount;$("#discountrow").style.display=r.discount?"flex":"none";$("#discountvalue").textContent=fa(r.discount)+" تومان";$("#couponmsg").textContent=r.discount?"کد تخفیف با موفقیت اعمال شد.":"این کد تخفیفی روی این سفارش ایجاد نمی‌کند.";syncPay()}catch(e){couponCode="";finalAmount=amount;$("#discountrow").style.display="none";$("#couponmsg").textContent=e.message;syncPay()}finally{b.disabled=false;b.textContent="اعمال کد"}});
+  $("#couponinput")?.addEventListener("input",()=>{if(couponCode){couponCode="";finalAmount=amount;$("#discountrow").style.display="none";syncPay()}});
+  btn.onclick=async()=>{
+    btn.disabled=true;btn.textContent="در حال ثبت سفارش…";
+    try{
+      const r=await api("/purchase",{method:"POST",body:JSON.stringify({product_id:id,gb,days,coupon_code:couponCode})});
+      const sv=await api(`/service?kind=o&id=${r.order_id}`);
+      S.data.user.wallet=r.wallet;
+      S.wallet=null;
+      S.usage[`o:${r.order_id}`]=sv;
+      const link=sv.link||"";
+      openSheet(`<div style="text-align:center;padding:18px 4px"><div class="big" style="color:var(--ok)">✓</div><h2>خرید با موفقیت انجام شد</h2><p class="muted">سرویس شما آماده است و از بخش «سرویس‌ها» هم قابل مشاهده است.</p></div>
+        <div class="card pad" style="margin:12px 0"><b>${esc(sv.title||product.name)}</b><p class="muted" style="margin-top:6px">${esc(link||"لینک سرویس در جزئیات سرویس قابل مشاهده است.")}</p></div>
+        ${link?`<button class="btn pri block" id="copynewlink">کپی لینک اتصال</button>`:""}
+        <button class="btn block" id="gotoservices" style="margin-top:8px">مشاهده سرویس‌ها</button>`);
+      $("#copynewlink")?.addEventListener("click",()=>copy(link,"لینک اتصال کپی شد"));
+      $("#gotoservices")?.addEventListener("click",()=>{closeSheet();setTab("services")});
+      const fresh=await api("/bootstrap");S.data={...S.data,...fresh};S.ready=true;
+    }catch(e){btn.disabled=false;btn.textContent="تلاش دوباره";toast(e.message||"خرید انجام نشد")}
+  };
+  $("#confirmbuycard")?.addEventListener("click",async()=>{const b=$("#confirmbuycard");b.disabled=true;try{const r=await api("/purchase-card",{method:"POST",body:JSON.stringify({product_id:id,gb,days,coupon_code:couponCode})});receiptPicker(r.order_id,r.amount,r.card_number,r.card_holder)}catch(e){b.disabled=false;toast(e.message)}});
+}
 const ACT={
   tab:el=>setTab(el.dataset.t),
   svc:el=>openService(el.dataset.k),
   qa:el=>{const q=el.dataset.q;if(q==="shop")setTab("shop");else if(q==="svcs")setTab("services");else{setTab("more").then(()=>{const t=q==="ref"?$("#refcard"):$("#helpsec");t&&t.scrollIntoView({behavior:"smooth",block:"center"})})}},
-  topup:()=>deep("topup"),
-  buy:el=>deep("p_"+el.dataset.id),
-  renew:el=>{const [kind,id]=el.dataset.k.split(":");deep(kind==="o"?"renew_"+id:"svc_e_"+id)},
-  xfer:el=>{const [kind,id]=el.dataset.k.split(":");deep(`svc_${kind}_${id}`)},
+  topup:el=>openTopup(Number(el?.dataset?.amount)||0),
+  tickets:()=>openTickets(),
+  buy:el=>checkoutProduct(el),
+  renew:el=>openRenew(el.dataset.k),
+  xfer:el=>openTransfer(el.dataset.k),
   howto:()=>{closeSheet();setTab("more").then(()=>setTimeout(()=>{const h=$("#helpsec");h&&h.scrollIntoView({behavior:"smooth"})},300))},
   cat:el=>{hap();S.cat=+el.dataset.id;render()},
   wf:el=>{hap();S.wf=el.dataset.f;render()},
